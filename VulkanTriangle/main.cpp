@@ -1,5 +1,8 @@
+#define VK_USE_PLATFORM_WIN32_KHR
 #define GLFW_INCLUDE_VULKAN
 #include<GLFW/glfw3.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include<GLFW/glfw3native.h>
 
 #include <vector>
 #include <iostream>
@@ -7,6 +10,7 @@
 #include <cstdlib>
 #include <algorithm>
 #include <optional>
+#include <set>
 
 const uint32_t WINDOW_WIDTH = 800;
 const uint32_t WINDOW_HEIGHT = 600;
@@ -47,9 +51,11 @@ void DestroyDebugUtilsMessengerEXT(VkInstance instance, VkDebugUtilsMessengerEXT
 }
 struct QueueFamilyIndices {
     std::optional<uint32_t> graphicsFamily;
+    // index of family which supports presentation to Windows
+    std::optional<uint32_t> presentationFamily;
     bool isComplete()
     {
-        return graphicsFamily.has_value();
+        return graphicsFamily.has_value() && presentationFamily.has_value();
     }
 };
 class HelloTriangleApplication {
@@ -81,6 +87,10 @@ private:
     VkDevice m_device;
     // a handle to the graphics queue from our logical device
     VkQueue graphicsQueue;
+    // a handle to vulkan surface
+    VkSurfaceKHR m_surface;
+    // a handle to the presentation queue from our logical device
+    VkQueue presentationQueue;
 
 
     void initWindow()
@@ -102,6 +112,8 @@ private:
         createInstance();
         // create a debug "thing"
         setupDebugMessenger();
+        // create a surface to paint stuff on using Vulkan
+        createSurface();
         // find and set a graphics card on the running machine as our device to do vulkan stuff
         pickPhysicalDevice();
         // create a logical version of the selected physical gpu/device we have selected
@@ -309,6 +321,14 @@ private:
         }
 
     }
+    void createSurface()
+    {   
+        // creates a surface for us, specifically made for windows machine
+        if (glfwCreateWindowSurface(m_instance, m_window, nullptr, &m_surface) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create window surface!");
+		}
+
+	}
 
     void pickPhysicalDevice() {
         // how many physical devices/GPUs we have on the system
@@ -368,6 +388,14 @@ private:
             {
 				indices.graphicsFamily = i;
 			}
+            VkBool32 presentationSupport = false;
+            // if this queue family supports presentation to our surface (surface has info about it belonging to windows)
+            vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentationSupport);
+            // if yes, store this queueFamilies index
+            if (presentationSupport)
+            {
+                indices.presentationFamily = i;
+            }
             if (indices.isComplete()) {
                 break;
             }
@@ -379,14 +407,23 @@ private:
         // queue family indices of the queues inside out physical device which as been selected
         QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
 
-        // create 1 queue in our logical version of the device
-        VkDeviceQueueCreateInfo queueCreateInfo{};
-        queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
-        queueCreateInfo.queueFamilyIndex = indices.graphicsFamily.value();
-        queueCreateInfo.queueCount = 1;
-        float queuePriority = 1.0f;
-        queueCreateInfo.pQueuePriorities = &queuePriority;
+        // create multiple queue families in our logical device to support multiple commands
+        // such as presentation, graphics, etc
+        std::vector<VkDeviceQueueCreateInfo> queueCreateInfos;
+        std::set<uint32_t> uniqueQueueFamilies = { indices.graphicsFamily.value(), indices.presentationFamily.value() };
 
+        float queuePriority = 1.0f;
+        // for every unique element in the set of queue families
+        for (uint32_t queueFamily : uniqueQueueFamilies) 
+        {
+            // create a queue info struct
+			VkDeviceQueueCreateInfo queueCreateInfo{};
+			queueCreateInfo.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO;
+			queueCreateInfo.queueFamilyIndex = queueFamily;
+			queueCreateInfo.queueCount = 1; // we only need 1 queue in this family
+			queueCreateInfo.pQueuePriorities = &queuePriority; // default priority
+			queueCreateInfos.push_back(queueCreateInfo);
+		}
         // info about features we want our logical device to have (currently none)
         VkPhysicalDeviceFeatures deviceFeatures{};
 
@@ -394,8 +431,9 @@ private:
         VkDeviceCreateInfo createInfo{};
         createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
         // its queues
-        createInfo.pQueueCreateInfos = &queueCreateInfo;
-        createInfo.queueCreateInfoCount = 1;
+        createInfo.pQueueCreateInfos = queueCreateInfos.data(); // stored at
+        createInfo.queueCreateInfoCount = static_cast<uint32_t>(queueCreateInfos.size()); // size of
+
         // its features
         createInfo.pEnabledFeatures = &deviceFeatures;
         // its extensions
@@ -413,6 +451,8 @@ private:
         }
         // retrieving a handle to the queues inside/associated with our logical device
         vkGetDeviceQueue(m_device, indices.graphicsFamily.value(), 0, &graphicsQueue);
+        // call to retrieve the queue handle of presentation queue (we already know the index)
+        vkGetDeviceQueue(m_device, indices.presentationFamily.value(), 0, &presentationQueue);
 
     }
 
@@ -422,6 +462,8 @@ private:
         if (enableValidationLayers) {
             DestroyDebugUtilsMessengerEXT(m_instance, debugMessenger, nullptr);
         }
+        // destroy the surface
+        vkDestroySurfaceKHR(m_instance, m_surface, nullptr);
         vkDestroyInstance(m_instance, nullptr);
         glfwDestroyWindow(m_window);
         glfwTerminate();

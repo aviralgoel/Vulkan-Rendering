@@ -1,4 +1,4 @@
 ﻿  main.cpp
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(181,1): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(273,27): warning C4018: '<': signed/unsigned mismatch
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(193,1): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(285,27): warning C4018: '<': signed/unsigned mismatch
   VulkanTriangle.vcxproj -> C:\Users\avira\source\repos\VulkanTriangle\x64\Debug\VulkanTriangle.exe
