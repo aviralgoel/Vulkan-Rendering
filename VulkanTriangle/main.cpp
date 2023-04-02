@@ -19,6 +19,10 @@ const uint32_t WINDOW_HEIGHT = 600;
 const std::vector<const char*> validationLayers = {
     "VK_LAYER_KHRONOS_validation"
 };
+// names of required extensions that our physical device must have
+const std::vector<const char*> deviceExtensions = {
+    "VK_KHR_SWAPCHAIN_EXTENSION_NAME"
+};
 
 // enable validation layers only when in debug mode 
 #ifdef NDEBUG
@@ -58,6 +62,15 @@ struct QueueFamilyIndices {
         return graphicsFamily.has_value() && presentationFamily.has_value();
     }
 };
+
+// properties we need our swap chain to support 
+struct SwapChainSupportDetails {
+    // types of properties
+    VkSurfaceCapabilitiesKHR capabilities;
+    std::vector<VkSurfaceFormatKHR> formats;
+    std::vector<VkPresentModeKHR> presentationModes;
+};
+
 class HelloTriangleApplication {
 public:
     // progression of our application startup
@@ -363,8 +376,50 @@ private:
     bool isDeviceSuitable(VkPhysicalDevice device)
     {   
         QueueFamilyIndices indices = findQueueFamilies(device);
+        bool extensionSupported = checkDeviceExtentionSupport(device);
+        bool swapChainAdequate = false;
+        if (extensionSupported)
+        {  
+            // what are all the swap chain functionalities our device has?
+            SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
+            // we have atleast one supported image format and one supported presentation mode given the window surface we have
+            swapChainAdequate = !swapChainSupport.formats.empty() && swapChainSupport.presentationModes.empty();
+        }
         // does this device has a queue family which we require?
-        return indices.isComplete();
+        return indices.isComplete() && extensionSupported && swapChainAdequate;
+    }
+
+    VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
+    {   
+        // out of all the available formats which are supported by our physical device (for our given surface)
+        // we iterate to find if a specific format is available
+        for (const auto& availableFormat : availableFormats)
+        {
+            if (availableFormat.format == VK_FORMAT_B8G8R8A8_SRGB && availableFormat.colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            {
+                return availableFormat;
+            }
+        }
+        // if our wish is not fulfilled, we just settle with th first one
+        return availableFormats[0];
+    }
+
+    bool checkDeviceExtentionSupport(VkPhysicalDevice device)
+    {   
+        // figure out how many and what all extentions are supported by our physical device
+        uint32_t extensionCount;
+        vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+        std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+        vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+        // list of extentions we ACTUALLY require
+        std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+
+        for (const auto& extension : availableExtensions)
+        {
+            requiredExtensions.erase(extension.extensionName);
+        }
+
+        return requiredExtensions.empty();
     }
     QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
     {   
@@ -403,6 +458,29 @@ private:
         }
         return indices;
     }
+    SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device)
+    {
+        SwapChainSupportDetails details;
+        // what are the basic surface capabilities that our device has?
+        vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, m_surface, &details.capabilities);
+        // what are the surface formars that our device has?
+        uint32_t formatCounts;
+        vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCounts, nullptr);
+        if(formatCounts!=0)
+        {
+            details.formats.resize(formatCounts);
+            vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCounts, details.formats.data());
+        }
+        // what are the presentation modes that our device has?
+        uint32_t presentModeCounts;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCounts, nullptr);
+        if (presentModeCounts != 0)
+        {
+            details.presentationModes.resize(presentModeCounts);
+            vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCounts, details.presentationModes.data());
+        }
+        return details;
+    }
     void createLogicalDevice() {
         // queue family indices of the queues inside out physical device which as been selected
         QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
@@ -436,8 +514,10 @@ private:
 
         // its features
         createInfo.pEnabledFeatures = &deviceFeatures;
-        // its extensions
-        createInfo.enabledExtensionCount = 0;
+        // its extensions count and names
+        createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
+        createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+        // debugging
         if (enableValidationLayers) {
             createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
             createInfo.ppEnabledLayerNames = validationLayers.data();
