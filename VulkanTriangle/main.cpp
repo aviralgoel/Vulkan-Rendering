@@ -12,6 +12,7 @@
 #include <optional>
 #include <set>
 #include <limits> // Necessary for std::numeric_limits
+#include <fstream> // shader files i/o
 
 const uint32_t WINDOW_WIDTH = 800;
 const uint32_t WINDOW_HEIGHT = 600;
@@ -33,6 +34,29 @@ const bool enableValidationLayers = false;
 const bool enableValidationLayers = true;
 #endif //NDEBUG
 
+// input function for reading shader files
+static std::vector<char> readFile(const std::string& filename) {
+    
+    // read the file in binary mode and start at the end of the file
+    std::ifstream file(filename, std::ios::ate | std::ios::binary);
+
+    // exception if file is not open
+    if (!file.is_open()) {
+        throw std::runtime_error("failed to open file!");
+    }
+
+    // how many bytes are in the file
+    size_t fileSize = (size_t)file.tellg();
+    // allocate appropriate size of buffer
+    std::vector<char> buffer(fileSize);
+
+    // read the file into the buffer from the beginning
+    file.seekg(0);
+    file.read(buffer.data(), fileSize);
+
+    file.close();
+    return buffer;
+}
 
 VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, 
     const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger) {
@@ -147,6 +171,8 @@ private:
         createSwapChain();
         // create image views for the swap chain images
         createImageViews();
+        // create graphics pipeline
+        createGraphicsPipeline();
     }
 
     void mainLoop() 
@@ -553,6 +579,14 @@ private:
 
 		}
 	}
+    void createGraphicsPipeline()
+    {
+        auto vertShaderCode = readFile("shaders/vert.spv");
+        auto fragShaderCode = readFile("shaders/frag.spv");
+        std::cout << "Size of vert shader code: " << vertShaderCode.size() << std::endl;
+        std::cout << "Size of frag shader code: " << fragShaderCode.size() << std::endl;
+
+    }
 
     // does a physical device support the extentions we require?
     bool checkDeviceExtentionSupport(VkPhysicalDevice device)
