@@ -583,10 +583,51 @@ private:
     {
         auto vertShaderCode = readFile("shaders/vert.spv");
         auto fragShaderCode = readFile("shaders/frag.spv");
-        std::cout << "Size of vert shader code: " << vertShaderCode.size() << std::endl;
-        std::cout << "Size of frag shader code: " << fragShaderCode.size() << std::endl;
+        //std::cout << "Size of vert shader code: " << vertShaderCode.size() << std::endl;
+        //std::cout << "Size of frag shader code: " << fragShaderCode.size() << std::endl;
+        VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
+        VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+
+        // create vertex shader stage info
+        VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
+        vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vertShaderStageInfo.module = vertShaderModule;
+        vertShaderStageInfo.pName = "main"; // entry point
+
+        // create fragment shader stage info
+        VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+        fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+        fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        fragShaderStageInfo.module = fragShaderModule;
+        fragShaderStageInfo.pName = "main"; // entry point
+
+        // array to hold both the stages
+        VkPipelineShaderStageCreateInfo shaderStages[] = { vertShaderStageInfo, fragShaderStageInfo };
+
+
+        // destroy shader modules linked to the logical device, since we now havd them in an array already
+        vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
+        vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
 
     }
+
+    // take raw shader bytecode and create a shader module (basically wrap it)
+    VkShaderModule createShaderModule(const std::vector<char>& code)
+    {
+		VkShaderModuleCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		createInfo.codeSize = code.size();
+        // reinterpret cast basically changes the type of the pointer
+		createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+		VkShaderModule shaderModule;
+        if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create shader module!");
+		}
+
+		return shaderModule;
+	}
 
     // does a physical device support the extentions we require?
     bool checkDeviceExtentionSupport(VkPhysicalDevice device)
