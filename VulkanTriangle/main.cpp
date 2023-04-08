@@ -145,8 +145,12 @@ private:
     VkExtent2D m_swapChainExtent;
     // image views for the swap chain images
     std::vector<VkImageView> m_swapChainImageViews;
+    // handle to render pass object
+    VkRenderPass m_renderPass;
     // handle to uniform values
     VkPipelineLayout m_pipelineLayout;
+    // final graphics pipeline
+    VkPipeline m_graphicsPipeline;
 
 
 
@@ -179,6 +183,8 @@ private:
         createSwapChain();
         // create image views for the swap chain images
         createImageViews();
+        // create a render pass object
+        createRenderPass();
         // create graphics pipeline
         createGraphicsPipeline();
     }
@@ -587,6 +593,40 @@ private:
 
 		}
 	}
+    void createRenderPass()
+    {
+        VkAttachmentDescription colorAttachment{};
+        colorAttachment.format = m_swapChainImageFormat;
+        colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+        colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+        colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+        colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+        // subpasses and attachment reference
+        VkAttachmentReference colorAttachmentRef{};
+        colorAttachmentRef.attachment = 0;
+        colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 1;
+        subpass.pColorAttachments = &colorAttachmentRef;
+
+        VkRenderPassCreateInfo renderPassInfo{};
+        renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        renderPassInfo.attachmentCount = 1;
+        renderPassInfo.pAttachments = &colorAttachment;
+        renderPassInfo.subpassCount = 1;
+        renderPassInfo.pSubpasses = &subpass;
+
+        if (vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create render pass!");
+		}
+    }
+
     void createGraphicsPipeline()
     {
         auto vertShaderCode = readFile("shaders/vert.spv");
@@ -712,11 +752,35 @@ private:
 			throw std::runtime_error("failed to create pipeline layout!");
 		}
 
+        // graphics pipeline creation
+        VkGraphicsPipelineCreateInfo pipelineInfo{};
+        pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+        pipelineInfo.stageCount = 2;
+        pipelineInfo.pStages = shaderStages;
+        pipelineInfo.pVertexInputState = &vertexInputInfo;
+        pipelineInfo.pInputAssemblyState = &inputAssembly;
+        pipelineInfo.pViewportState = &viewportState;
+        pipelineInfo.pRasterizationState = &rasterizer;
+        pipelineInfo.pMultisampleState = &multisampling;
+        pipelineInfo.pDepthStencilState = nullptr; // Optional
+        pipelineInfo.pColorBlendState = &colorBlending;
+        pipelineInfo.pDynamicState = &dynamicState;
+        pipelineInfo.layout = m_pipelineLayout;
+        pipelineInfo.renderPass = m_renderPass;
+        pipelineInfo.subpass = 0;
+        pipelineInfo.basePipelineHandle = VK_NULL_HANDLE; // Optional
+        pipelineInfo.basePipelineIndex = -1; // Optional
+
+        if (vkCreateGraphicsPipelines(m_device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &m_graphicsPipeline) != VK_SUCCESS) {
+            throw std::runtime_error("failed to create graphics pipeline!");
+        }
+
         // destroy shader modules linked to the logical device, since we now havd them in an array already
         vkDestroyShaderModule(m_device, fragShaderModule, nullptr);
         vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
 
     }
+
 
     // take raw shader bytecode and create a shader module (basically wrap it)
     VkShaderModule createShaderModule(const std::vector<char>& code)
@@ -882,8 +946,11 @@ private:
 
     void cleanup() 
     {   
+        vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
         // delete the pipeline layout (uniforms)
         vkDestroyPipelineLayout(m_device, m_pipelineLayout, nullptr);
+        // delete the render pass object
+        vkDestroyRenderPass(m_device, m_renderPass, nullptr);
         // delete all swap chain image views
         for (auto imageView : m_swapChainImageViews) {
 			vkDestroyImageView(m_device, imageView, nullptr);
