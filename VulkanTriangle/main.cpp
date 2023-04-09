@@ -418,7 +418,7 @@ private:
 		}
 	}
 	/////////////////////////////////////
-	// PHYSICAL DEVICE
+	// PHYSICAL DEVICE (Search, Select, Suitability, Compatability)
 	/////////////////////////////////////
 	void pickPhysicalDevice() {
 		// how many physical devices/GPUs we have on the system
@@ -448,20 +448,22 @@ private:
 		{
 			throw std::runtime_error("failed to find a suitable GPU!");
 		}
+
 	}
 	bool isDeviceSuitable(VkPhysicalDevice device)
 	{
-		// does our physical device have required queue families?
+		// does our physical device have required queue families (graphics and presentation)?
 		QueueFamilyIndices indices = findQueueFamilies(device);
 		// does our physical device have required extensions available?
-		bool extensionSupported = checkDeviceExtentionSupport(device);
+		bool extensionSupported = checkDeviceExtentionSupport(device); //  swap chain support
 		bool swapChainAdequate = false;
+		// if we have swap chain support then
 		if (extensionSupported)
 		{
 			// at this point we know that swap chain extention is supported by our physical device
 			// what are all the swap chain functionalities our device has?
 			SwapChainSupportDetails swapChainSupport = querySwapChainSupport(device);
-			// we have atleast one supported image format and one supported presentation mode given the window surface we have
+			// we have atleast one supported image format and one supported presentation mode compatible with the window surface we have
 			swapChainAdequate = !swapChainSupport.formats.empty() && !swapChainSupport.presentationModes.empty();
 		}
 
@@ -469,6 +471,95 @@ private:
 		// and does it have a swap chain which is compatible with our surface and window
 		return indices.isComplete() && extensionSupported && swapChainAdequate;
 	}
+
+	// does a physical device support the extentions we require?
+	bool checkDeviceExtentionSupport(VkPhysicalDevice device)
+	{
+		// figure out how many and what all extentions are supported by our physical device
+		uint32_t extensionCount;
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
+		std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
+
+		// list of extentions we ACTUALLY require
+		std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+
+		// iterate over all the available extentions by our physical device
+		for (const auto& extension : availableExtensions)
+		{
+			// check if it is one of the required one, if yes, cross them off
+			requiredExtensions.erase(extension.extensionName);
+		}
+
+		// true or false
+		return requiredExtensions.empty();
+	}
+
+	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
+	{
+		QueueFamilyIndices indices;
+		// figure out how many different type of queue families are supported by our selected device
+		uint32_t queueFamilyCount = 0;
+		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
+		// list all of them in a vector
+		std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
+		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
+
+		int i = 0;
+		// iterate over every family
+		for (const auto& queueFamily : queueFamilies)
+		{
+			// if this queueu family supports graphic operations/commands
+			if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
+			{
+				indices.graphicsFamily = i;
+			}
+			VkBool32 presentationSupport = false;
+			// if this queue family supports presentation to our surface (surface has info about it belonging to windows)
+			vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentationSupport);
+			// if yes, store this queueFamilies index
+			if (presentationSupport)
+			{
+				indices.presentationFamily = i;
+			}
+			if (indices.isComplete()) {
+				break;
+			}
+			i++;
+		}
+		return indices;
+	}
+
+	// what are the capabilities of the swap chain that our physical device has
+	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device)
+	{
+		SwapChainSupportDetails details;
+		// what are the basic surface capabilities that we need
+		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, m_surface, &details.capabilities);
+		// what are the surface formats that we need
+		uint32_t formatCounts;
+		vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCounts, nullptr);
+		if (formatCounts != 0)
+		{
+			details.formats.resize(formatCounts);
+			vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCounts, details.formats.data());
+		}
+
+		// what are the presentation modes that we need
+		uint32_t presentModeCounts;
+		vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCounts, nullptr);
+		if (presentModeCounts != 0)
+		{
+			details.presentationModes.resize(presentModeCounts);
+			vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCounts, details.presentationModes.data());
+		}
+		// this struct has the required settings our swap chain must have to work
+		return details;
+	}
+
+	/////////////////////////////////////
+	// PHYSICAL DEVICE (Search, Select, Suitability, Compatability)
+	/////////////////////////////////////	
 
 	// what is the best format for our swap chain images
 	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
@@ -913,90 +1004,6 @@ private:
 		return shaderModule;
 	}
 
-	// does a physical device support the extentions we require?
-	bool checkDeviceExtentionSupport(VkPhysicalDevice device)
-	{
-		// figure out how many and what all extentions are supported by our physical device
-		uint32_t extensionCount;
-		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, nullptr);
-		std::vector<VkExtensionProperties> availableExtensions(extensionCount);
-		vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
-
-		// list of extentions we ACTUALLY require
-		std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
-
-		// iterate over all the available extentions by our physical device
-		for (const auto& extension : availableExtensions)
-		{
-			// check if it is one of the required one, if yes, cross them off
-			requiredExtensions.erase(extension.extensionName);
-		}
-
-		// true or false
-		return requiredExtensions.empty();
-	}
-
-	QueueFamilyIndices findQueueFamilies(VkPhysicalDevice device)
-	{
-		QueueFamilyIndices indices;
-		// figure out how many different type of queue families are supported by our selected device
-		uint32_t queueFamilyCount = 0;
-		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, nullptr);
-		// list all of them in a vector
-		std::vector<VkQueueFamilyProperties> queueFamilies(queueFamilyCount);
-		vkGetPhysicalDeviceQueueFamilyProperties(device, &queueFamilyCount, queueFamilies.data());
-
-		int i = 0;
-		// iterate over every family
-		for (const auto& queueFamily : queueFamilies)
-		{
-			// if this queueu family supports graphic operations/commands
-			if (queueFamily.queueFlags & VK_QUEUE_GRAPHICS_BIT)
-			{
-				indices.graphicsFamily = i;
-			}
-			VkBool32 presentationSupport = false;
-			// if this queue family supports presentation to our surface (surface has info about it belonging to windows)
-			vkGetPhysicalDeviceSurfaceSupportKHR(device, i, m_surface, &presentationSupport);
-			// if yes, store this queueFamilies index
-			if (presentationSupport)
-			{
-				indices.presentationFamily = i;
-			}
-			if (indices.isComplete()) {
-				break;
-			}
-			i++;
-		}
-		return indices;
-	}
-
-	// what are the capabilities of the swap chain that our physical device has
-	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device)
-	{
-		SwapChainSupportDetails details;
-		// what are the basic surface capabilities that we need
-		vkGetPhysicalDeviceSurfaceCapabilitiesKHR(device, m_surface, &details.capabilities);
-		// what are the surface formars that we need
-		uint32_t formatCounts;
-		vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCounts, nullptr);
-		if (formatCounts != 0)
-		{
-			details.formats.resize(formatCounts);
-			vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCounts, details.formats.data());
-		}
-
-		// what are the presentation modes that we need
-		uint32_t presentModeCounts;
-		vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCounts, nullptr);
-		if (presentModeCounts != 0)
-		{
-			details.presentationModes.resize(presentModeCounts);
-			vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCounts, details.presentationModes.data());
-		}
-		// this struct has the required settings our swap chain must have to work
-		return details;
-	}
 	void createLogicalDevice() {
 		// queue family indices of the queues inside out physical device which as been selected
 		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
