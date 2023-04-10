@@ -530,6 +530,76 @@ private:
 		return indices;
 	}
 
+
+	/////////////////////////////////////
+	// Swap Chain (Search, 
+	/////////////////////////////////////	
+
+	// create swap chain
+	void createSwapChain() {
+		// what is being supported by our physical device
+		SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
+		// best possible settings for our swap chain
+		VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
+		VkPresentModeKHR presentMode = chooseSwapPresentationMode(swapChainSupport.presentationModes);
+		VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
+
+		// recommended to have atleast one more than minimum
+		uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
+		if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
+			imageCount = swapChainSupport.capabilities.maxImageCount;
+		}
+
+		// struct for creating swap chain
+		VkSwapchainCreateInfoKHR createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
+		createInfo.surface = m_surface; // surface we are creating swap chain for
+		createInfo.minImageCount = imageCount; // minimum number of images in swap chain
+		createInfo.imageFormat = surfaceFormat.format; // format of images in swap chain
+		createInfo.imageColorSpace = surfaceFormat.colorSpace; // color space of images in swap chain
+		createInfo.imageExtent = extent; // resolution of images in swap chain
+		createInfo.imageArrayLayers = 1; // number of layers for each image in swap chain
+		createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // what kind of operations we will use the images in swap chain for
+
+		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
+		uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentationFamily.value() };
+
+		// is graphic queue different than presentation queue
+		if (indices.graphicsFamily != indices.presentationFamily) {
+			// don't enforce too strict rules for sharing
+			createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
+			createInfo.queueFamilyIndexCount = 2;
+			createInfo.pQueueFamilyIndices = queueFamilyIndices;
+		}
+		else {
+			// be strict about sharing (anyway they are the same queueu) [This is easier to implement]
+			createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
+			createInfo.queueFamilyIndexCount = 0; // Optional
+			createInfo.pQueueFamilyIndices = nullptr; // Optional
+		}
+
+		createInfo.preTransform = swapChainSupport.capabilities.currentTransform; // transformation to perform on swap chain images
+		createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; // how to handle blending with other windows in window system
+
+		createInfo.presentMode = presentMode;
+
+		// topics to be learned later
+		createInfo.clipped = VK_TRUE;
+		createInfo.oldSwapchain = VK_NULL_HANDLE;
+
+		// creation!!
+		if (vkCreateSwapchainKHR(m_device, &createInfo, nullptr, &m_swapChain) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create swap chain!");
+		}
+
+		// handle to images in the swap chain
+		vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, nullptr);
+		m_swapChainImages.resize(imageCount);
+		vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, m_swapChainImages.data());
+		m_swapChainImageFormat = surfaceFormat.format;
+		// handle to the extent of swap chain
+		m_swapChainExtent = extent;
+	}
 	// what are the capabilities of the swap chain that our physical device has
 	SwapChainSupportDetails querySwapChainSupport(VkPhysicalDevice device)
 	{
@@ -544,7 +614,6 @@ private:
 			details.formats.resize(formatCounts);
 			vkGetPhysicalDeviceSurfaceFormatsKHR(device, m_surface, &formatCounts, details.formats.data());
 		}
-
 		// what are the presentation modes that we need
 		uint32_t presentModeCounts;
 		vkGetPhysicalDeviceSurfacePresentModesKHR(device, m_surface, &presentModeCounts, nullptr);
@@ -556,11 +625,6 @@ private:
 		// this struct has the required settings our swap chain must have to work
 		return details;
 	}
-
-	/////////////////////////////////////
-	// PHYSICAL DEVICE (Search, Select, Suitability, Compatability)
-	/////////////////////////////////////	
-
 	// what is the best format for our swap chain images
 	VkSurfaceFormatKHR chooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
 	{
@@ -576,7 +640,6 @@ private:
 		// if our wish is not fulfilled, we just settle with th first one
 		return availableFormats[0];
 	}
-
 	// what is the best presentation mode for our swap chain images
 	VkPresentModeKHR chooseSwapPresentationMode(const std::vector<VkPresentModeKHR>& availablePresentationModes)
 	{
@@ -614,70 +677,6 @@ private:
 		}
 	}
 
-	void createSwapChain() {
-		// what is being supported by our physical device
-		SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice);
-		// best possible settings for our swap chain
-		VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
-		VkPresentModeKHR presentMode = chooseSwapPresentationMode(swapChainSupport.presentationModes);
-		VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
-
-		// recommended to have atleast one more than minimum
-		uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
-		if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount) {
-			imageCount = swapChainSupport.capabilities.maxImageCount;
-		}
-
-		// struct for creating swap chain
-		VkSwapchainCreateInfoKHR createInfo{};
-		createInfo.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-		createInfo.surface = m_surface;
-		createInfo.minImageCount = imageCount;
-		createInfo.imageFormat = surfaceFormat.format;
-		createInfo.imageColorSpace = surfaceFormat.colorSpace;
-		createInfo.imageExtent = extent;
-		createInfo.imageArrayLayers = 1;
-		createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-
-		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
-		uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentationFamily.value() };
-
-		// is graphic queue different than presentation queue
-		if (indices.graphicsFamily != indices.presentationFamily) {
-			// don't enforce too strict rules for sharing
-			createInfo.imageSharingMode = VK_SHARING_MODE_CONCURRENT;
-			createInfo.queueFamilyIndexCount = 2;
-			createInfo.pQueueFamilyIndices = queueFamilyIndices;
-		}
-		else {
-			// be strict about sharing (anyway they are the same queueu) [This is easier to implement]
-			createInfo.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-			createInfo.queueFamilyIndexCount = 0; // Optional
-			createInfo.pQueueFamilyIndices = nullptr; // Optional
-		}
-
-		createInfo.preTransform = swapChainSupport.capabilities.currentTransform;
-		createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-
-		createInfo.presentMode = presentMode;
-
-		// topics to be learned later
-		createInfo.clipped = VK_TRUE;
-		createInfo.oldSwapchain = VK_NULL_HANDLE;
-
-		// creation!!
-		if (vkCreateSwapchainKHR(m_device, &createInfo, nullptr, &m_swapChain) != VK_SUCCESS) {
-			throw std::runtime_error("failed to create swap chain!");
-		}
-
-		// handle to images in the swap chain
-		vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, nullptr);
-		m_swapChainImages.resize(imageCount);
-		vkGetSwapchainImagesKHR(m_device, m_swapChain, &imageCount, m_swapChainImages.data());
-		m_swapChainImageFormat = surfaceFormat.format;
-		// handle to the extent of swap chain
-		m_swapChainExtent = extent;
-	}
 	void createImageViews() {
 		m_swapChainImageViews.resize(m_swapChainImages.size());
 
