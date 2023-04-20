@@ -15,6 +15,7 @@
 
 const uint32_t WINDOW_WIDTH = 800;
 const uint32_t WINDOW_HEIGHT = 600;
+const int MAX_FRAMES_IN_FLIGHT = 2;
 
 // names of validation layers to enable
 const std::vector<const char*> validationLayers = {
@@ -28,7 +29,7 @@ const std::vector<const char*> deviceExtensions = {
 // the names of the states that we want to dynamically change in the rendering pipeline
 const std::vector<VkDynamicState> dynamicStates = {
 	VK_DYNAMIC_STATE_VIEWPORT,
-	VK_DYNAMIC_STATE_LINE_WIDTH
+	VK_DYNAMIC_STATE_SCISSOR
 };
 
 // enable validation layers only when in debug mode
@@ -120,6 +121,8 @@ public:
 private:
 
 	GLFWwindow* m_window;
+	// current frame index
+	uint32_t currentFrame = 0;
 
 	// handle to the Vulkan instance
 	VkInstance m_instance;
@@ -150,12 +153,23 @@ private:
 	VkPipelineLayout m_pipelineLayout;
 	// final graphics pipeline
 	VkPipeline m_graphicsPipeline;
-	// handle to the framebuffers
+	// handle to the framebuffers for each swap chain image
 	std::vector<VkFramebuffer> m_swapChainFramebuffers;
-	// handle to the command pool
+	// handle to the command pool, bigger object that manages the memory for the command buffers
 	VkCommandPool m_commandPool;
 	// handle to the command buffer
-	VkCommandBuffer m_commandBuffer;
+	//VkCommandBuffer m_commandBuffer;
+	std::vector<VkCommandBuffer> m_commandBuffers;
+	///////////////////////////
+	// semaphores and fences //
+	///////////////////////////
+	//VkSemaphore m_imageAvailableSemaphore; // an image has been acquired and is ready for rendering
+	//VkSemaphore m_renderFinishedSemaphore; // rendering has finished and presentation can happen
+	//VkFence m_inFlightFence; // fence to syncronize the cpu and gpu
+
+	std::vector<VkFence> m_inFlightFences; // fences for each frame in flight
+	std::vector<VkSemaphore> m_imageAvailableSemaphores; // semaphores for each frame in flight
+	std::vector<VkSemaphore> m_renderFinishedSemaphores; // semaphores for each frame in flight
 
 	void initWindow()
 	{
@@ -193,10 +207,12 @@ private:
 		createGraphicsPipeline();
 		// create framebuffers
 		createFramebuffers();
-		// create command pool
+		// create command pool to manage memory for future command buffers
 		createCommandPool();
 		// create command buffer
-		createCommandBuffer();
+		createCommandBuffers();
+		// creating semaphores and fences
+		createSyncObjects();
 	}
 
 	void mainLoop()
@@ -204,7 +220,11 @@ private:
 		while (!glfwWindowShouldClose(m_window))
 		{
 			glfwPollEvents();
+			drawFrame();
+
 		}
+		// wait for the device to finish all operations before exiting
+		vkDeviceWaitIdle(m_device);
 	}
 	/////////////////////////////
 	// create a vulkan instance
@@ -400,7 +420,7 @@ private:
 		VkDebugUtilsMessengerCreateInfoEXT createInfo;
 		populateDebugMessengerCreateInfo(createInfo);
 
-		
+		// links the instance with the debug messenger, when to call = createInfo, what to call = debugMessenger
 		if (CreateDebugUtilsMessengerEXT(m_instance, &createInfo, nullptr, &debugMessenger) != VK_SUCCESS) {
 			throw std::runtime_error("failed to set up debug messenger!");
 		}
@@ -560,6 +580,7 @@ private:
 		createInfo.imageExtent = extent; // resolution of images in swap chain
 		createInfo.imageArrayLayers = 1; // number of layers for each image in swap chain
 		createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT; // what kind of operations we will use the images in swap chain for
+		createInfo.presentMode = presentMode;
 
 		QueueFamilyIndices indices = findQueueFamilies(physicalDevice);
 		uint32_t queueFamilyIndices[] = { indices.graphicsFamily.value(), indices.presentationFamily.value() };
@@ -581,7 +602,6 @@ private:
 		createInfo.preTransform = swapChainSupport.capabilities.currentTransform; // transformation to perform on swap chain images
 		createInfo.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR; // how to handle blending with other windows in window system
 
-		createInfo.presentMode = presentMode;
 
 		// topics to be learned later
 		createInfo.clipped = VK_TRUE;
@@ -643,6 +663,8 @@ private:
 	// what is the best presentation mode for our swap chain images
 	VkPresentModeKHR chooseSwapPresentationMode(const std::vector<VkPresentModeKHR>& availablePresentationModes)
 	{
+		// out of all the available presentation modes which are supported by our physical device (for our given surface)
+		// we iterate to find if a specific presentation mode is available
 		for (const auto& currentMode : availablePresentationModes)
 		{
 			if (currentMode == VK_PRESENT_MODE_MAILBOX_KHR)
@@ -704,24 +726,34 @@ private:
 	void createRenderPass()
 	{
 		VkAttachmentDescription colorAttachment{};
-		colorAttachment.format = m_swapChainImageFormat;
-		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-		colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-		colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-		colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-		colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+		colorAttachment.format = m_swapChainImageFormat; // same as the swap chain image format
+		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; // no multisampling
+		colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR; // clear the values to a constant at the start
+		colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE; // we want to store the rendered contents for displaying it later
+		colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE; // we don't care about the stencil buffer
+		colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE; // we don't care about the stencil buffer
+		colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED; // we don't care about the previous layout 
+		colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR; // we want to present the image in the swap chain
 
 		// subpasses and attachment reference
-		VkAttachmentReference colorAttachmentRef{};
-		colorAttachmentRef.attachment = 0;
-		colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+		VkAttachmentReference colorAttachmentRef{}; 
+		colorAttachmentRef.attachment = 0; // the index of the attachment in the attachment description array
+		colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL; // the layout the attachment will have during the subpass
 
 		VkSubpassDescription subpass{};
-		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+		subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS; // we are using this subpass in a graphics pipeline
 		subpass.colorAttachmentCount = 1;
 		subpass.pColorAttachments = &colorAttachmentRef;
+
+		VkSubpassDependency dependency{};
+		dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+		dependency.dstSubpass = 0;
+
+		dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.srcAccessMask = 0;
+
+		dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+		dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
 		VkRenderPassCreateInfo renderPassInfo{};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
@@ -729,6 +761,13 @@ private:
 		renderPassInfo.pAttachments = &colorAttachment;
 		renderPassInfo.subpassCount = 1;
 		renderPassInfo.pSubpasses = &subpass;
+		renderPassInfo.dependencyCount = 1;
+		renderPassInfo.pDependencies = &dependency;
+
+
+
+
+
 
 		if (vkCreateRenderPass(m_device, &renderPassInfo, nullptr, &m_renderPass) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create render pass!");
@@ -736,13 +775,15 @@ private:
 	}
 
 	void createGraphicsPipeline()
-	{
+	{	
+		// piece of code to run for every vertex
 		auto vertShaderCode = readFile("shaders/vert.spv");
+		// piece of code to run for every fragment (pixel)
 		auto fragShaderCode = readFile("shaders/frag.spv");
 		//std::cout << "Size of vert shader code: " << vertShaderCode.size() << std::endl;
 		//std::cout << "Size of frag shader code: " << fragShaderCode.size() << std::endl;
-		VkShaderModule vertShaderModule = createShaderModule(vertShaderCode);
-		VkShaderModule fragShaderModule = createShaderModule(fragShaderCode);
+		VkShaderModule vertShaderModule = createShaderModule(vertShaderCode); // create a shader module from the code
+		VkShaderModule fragShaderModule = createShaderModule(fragShaderCode); // create a shader module from the code
 
 		// create vertex shader stage info
 		VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
@@ -867,12 +908,12 @@ private:
 		pipelineInfo.pStages = shaderStages;
 		pipelineInfo.pVertexInputState = &vertexInputInfo;
 		pipelineInfo.pInputAssemblyState = &inputAssembly;
-		pipelineInfo.pViewportState = &viewportState;
+		pipelineInfo.pViewportState = &viewportState; // Optional
 		pipelineInfo.pRasterizationState = &rasterizer;
 		pipelineInfo.pMultisampleState = &multisampling;
 		pipelineInfo.pDepthStencilState = nullptr; // Optional
 		pipelineInfo.pColorBlendState = &colorBlending;
-		pipelineInfo.pDynamicState = &dynamicState;
+		pipelineInfo.pDynamicState = &dynamicState; // viewport and scissor
 		pipelineInfo.layout = m_pipelineLayout;
 		pipelineInfo.renderPass = m_renderPass;
 		pipelineInfo.subpass = 0;
@@ -894,20 +935,20 @@ private:
 
 		// create a framebuffer for each swapchain image
 		for (size_t i = 0; i < m_swapChainImageViews.size(); i++) {
+
 			// create a framebuffer for each swapchain image
-			VkImageView attachments[] = {
-				m_swapChainImageViews[i]
-			};
+			VkImageView attachments[] = { m_swapChainImageViews[i] };
 
 			VkFramebufferCreateInfo framebufferInfo{};
 			framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-			framebufferInfo.renderPass = m_renderPass;
-			framebufferInfo.attachmentCount = 1;
-			framebufferInfo.pAttachments = attachments;
-			framebufferInfo.width = m_swapChainExtent.width;
-			framebufferInfo.height = m_swapChainExtent.height;
-			framebufferInfo.layers = 1;
+			framebufferInfo.renderPass = m_renderPass; // render pass to use with this framebuffer
+			framebufferInfo.attachmentCount = 1; // number of attachments
+			framebufferInfo.pAttachments = attachments; // list of attachments
+			framebufferInfo.width = m_swapChainExtent.width; // width of the framebuffer
+			framebufferInfo.height = m_swapChainExtent.height; // height of the framebuffer
+			framebufferInfo.layers = 1; // number of layers
 
+			// create ith framebuffer
 			if (vkCreateFramebuffer(m_device, &framebufferInfo, nullptr, &m_swapChainFramebuffers[i]) != VK_SUCCESS) {
 				throw std::runtime_error("failed to create framebuffer!");
 			}
@@ -915,93 +956,44 @@ private:
 	}
 	void createCommandPool()
 	{
+		/*	a command pool is a memory pool that is used to manage the memory resources for command buffers.
+		Think of a command buffer as a list of instructions that tell the GPU what to do, such as drawing objects or updating buffers. 
+		The command pool is responsible for allocating and managing the memory used by these command buffers.
+		When you create a command pool, you specify the type of command buffer that it will manage, such as graphics or compute. 
+		This allows the command pool to optimize the memory allocation and management specifically for that type of command buffer.
+		By using a command pool, you can efficiently manage the creation and destruction of command buffers without having to manually allocate 
+		and deallocate memory each time. This can improve the performance of your application by reducing the overhead of memory management 
+		and allowing the GPU to process commands more efficiently.
+		*/
 		QueueFamilyIndices queueFamilyIndices = findQueueFamilies(physicalDevice);
 
 		VkCommandPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-		poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value();
+		poolInfo.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT; // allow command buffers to be reset
+		poolInfo.queueFamilyIndex = queueFamilyIndices.graphicsFamily.value(); // command pool is for graphics queue
 		if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create graphics command pool!");
 		}
 	}
-	void createCommandBuffer()
-	{
+	void createCommandBuffers()
+	{	
+		// resize the command buffer array to number of inflight frames allowed
+		m_commandBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+
+		// we have two command buffers now beacause MAX_FRAMES_IN_FLIGHT = 2
 		VkCommandBufferAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 		allocInfo.commandPool = m_commandPool;
 		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-		allocInfo.commandBufferCount = 1;
+		allocInfo.commandBufferCount = (uint32_t) m_commandBuffers.size();
 
-		if (vkAllocateCommandBuffers(m_device, &allocInfo, &m_commandBuffer) != VK_SUCCESS) {
+		if (vkAllocateCommandBuffers(m_device, &allocInfo, m_commandBuffers.data()) != VK_SUCCESS) {
 			throw std::runtime_error("failed to allocate command buffers!");
 		}
 	}
-	// writes the commands we want to execute into a command buffer
-	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
-		VkCommandBufferBeginInfo beginInfo{};
-		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = 0; // Optional
-		beginInfo.pInheritanceInfo = nullptr; // Optional
 
-		if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
-			throw std::runtime_error("failed to begin recording command buffer!");
-		}
 
-		VkRenderPassBeginInfo renderPassInfo{};
-		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-		renderPassInfo.renderPass = m_renderPass;
-		renderPassInfo.framebuffer = m_swapChainFramebuffers[imageIndex];
 
-		renderPassInfo.renderArea.offset = { 0, 0 };
-		renderPassInfo.renderArea.extent = m_swapChainExtent;
-
-		VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
-		renderPassInfo.clearValueCount = 1;
-		renderPassInfo.pClearValues = &clearColor;
-
-		vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
-
-		VkViewport viewport{};
-		viewport.x = 0.0f;
-		viewport.y = 0.0f;
-		viewport.width = static_cast<float>(m_swapChainExtent.width);
-		viewport.height = static_cast<float>(m_swapChainExtent.height);
-		viewport.minDepth = 0.0f;
-		viewport.maxDepth = 1.0f;
-		vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
-
-		VkRect2D scissor{};
-		scissor.offset = { 0, 0 };
-		scissor.extent = m_swapChainExtent;
-		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
-
-		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
-		vkCmdEndRenderPass(commandBuffer);
-
-		if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
-			throw std::runtime_error("failed to record command buffer!");
-		}
-	}
-
-	// take raw shader bytecode and create a shader module (basically wrap it)
-	VkShaderModule createShaderModule(const std::vector<char>& code)
-	{
-		VkShaderModuleCreateInfo createInfo{};
-		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-		createInfo.codeSize = code.size();
-		// reinterpret cast basically changes the type of the pointer
-		createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-		VkShaderModule shaderModule;
-		if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
-			throw std::runtime_error("failed to create shader module!");
-		}
-
-		return shaderModule;
-	}
 
 	void createLogicalDevice() {
 		// queue family indices of the queues inside out physical device which as been selected
@@ -1059,9 +1051,182 @@ private:
 		// call to retrieve the queue handle of presentation queue (we already know the index)
 		vkGetDeviceQueue(m_device, indices.presentationFamily.value(), 0, &presentationQueue);
 	}
+	// take raw shader bytecode and create a shader module (basically wrap it)
+	VkShaderModule createShaderModule(const std::vector<char>& code)
+	{
+		VkShaderModuleCreateInfo createInfo{};
+		createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+		createInfo.codeSize = code.size();
+		// reinterpret cast basically changes the type of the pointer
+		createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
+
+		VkShaderModule shaderModule;
+		if (vkCreateShaderModule(m_device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create shader module!");
+		}
+
+		return shaderModule;
+	}
+	// writes the commands we want to execute into a command buffer
+	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+
+		//  begin recording the command buffer by calling vkBeginCommandBuffer 
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = 0; // Optional
+		beginInfo.pInheritanceInfo = nullptr; // Optional
+
+		if (vkBeginCommandBuffer(commandBuffer, &beginInfo) != VK_SUCCESS) {
+			throw std::runtime_error("failed to begin recording command buffer!");
+		}
+
+		// start a render pass
+		VkRenderPassBeginInfo renderPassInfo{};
+		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+		renderPassInfo.renderPass = m_renderPass;
+		renderPassInfo.framebuffer = m_swapChainFramebuffers[imageIndex];
+
+		renderPassInfo.renderArea.offset = { 0, 0 };
+		renderPassInfo.renderArea.extent = m_swapChainExtent;
+
+		VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+		renderPassInfo.clearValueCount = 1;
+		renderPassInfo.pClearValues = &clearColor;
+
+		// begin the render pass
+		vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+
+		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
+
+		// set dynamic viewport and scissor
+		VkViewport viewport{};
+		viewport.x = 0.0f;
+		viewport.y = 0.0f;
+		viewport.width = static_cast<float>(m_swapChainExtent.width);
+		viewport.height = static_cast<float>(m_swapChainExtent.height);
+		viewport.minDepth = 0.0f;
+		viewport.maxDepth = 1.0f;
+		vkCmdSetViewport(commandBuffer, 0, 1, &viewport);
+
+		VkRect2D scissor{};
+		scissor.offset = { 0, 0 };
+		scissor.extent = m_swapChainExtent;
+		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
+
+		// actual draw call
+		vkCmdDraw(commandBuffer, 3, 1, 0, 0);
+
+		// end the render pass
+		vkCmdEndRenderPass(commandBuffer);
+
+		// end recording the command buffer
+		if (vkEndCommandBuffer(commandBuffer) != VK_SUCCESS) {
+			throw std::runtime_error("failed to record command buffer!");
+		}
+	}
+
+	void createSyncObjects() {
+		m_imageAvailableSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		m_renderFinishedSemaphores.resize(MAX_FRAMES_IN_FLIGHT);
+		m_inFlightFences.resize(MAX_FRAMES_IN_FLIGHT);
+
+
+		// create a semaphore info struct
+		VkSemaphoreCreateInfo semaphoreInfo{};
+		semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+		// create a fence info struct
+		VkFenceCreateInfo fenceInfo{};
+		fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+		fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT; // set the fence to be signaled at creation [Green Light]
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			if (vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_imageAvailableSemaphores[i]) != VK_SUCCESS ||
+				vkCreateSemaphore(m_device, &semaphoreInfo, nullptr, &m_renderFinishedSemaphores[i]) != VK_SUCCESS ||
+				vkCreateFence(m_device, &fenceInfo, nullptr, &m_inFlightFences[i]) != VK_SUCCESS)
+			{
+				throw std::runtime_error("failed to create synchronization objects for a frame!");
+			}
+		}
+
+		
+	}
+
+	void drawFrame()
+	{
+		// wait for the fence to be signaled [Green light that previous frame has finished and new frame rendering can begin]
+		vkWaitForFences(m_device, 1, &m_inFlightFences[currentFrame], VK_TRUE, UINT64_MAX);
+
+		// Switch on Red light for the fence
+		vkResetFences(m_device, 1, &m_inFlightFences[currentFrame]);
+
+		uint32_t imageIndex;
+		// acquire an image from the swap chain, when done, signal the semaphore ON
+		vkAcquireNextImageKHR(m_device, m_swapChain, UINT64_MAX, m_imageAvailableSemaphores[currentFrame], VK_NULL_HANDLE, &imageIndex);
+		
+		// now let us render to this image
+		// we need to specify which command buffer to use for this image
+		// we can use the image index to select the command buffer
+		vkResetCommandBuffer(m_commandBuffers[currentFrame], 0);
+		// begin recording the command buffer
+		recordCommandBuffer(m_commandBuffers[currentFrame],imageIndex);
+
+		// submit the command buffer to the graphics queue
+		// we need to specify which semaphores to wait on before execution and which to signal when execution is done
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		// wait on the image available semaphore
+		VkSemaphore waitSemaphores[] = { m_imageAvailableSemaphores[currentFrame]}; // wait for these to be signaled
+		VkPipelineStageFlags waitStages[] = { VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT };
+		submitInfo.waitSemaphoreCount = 1;
+		submitInfo.pWaitSemaphores = waitSemaphores;
+		submitInfo.pWaitDstStageMask = waitStages;
+		// submit the command buffer
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &m_commandBuffers[currentFrame];
+
+		// signal the render finished semaphore when done
+		VkSemaphore signalSemaphores[] = { m_renderFinishedSemaphores[currentFrame]}; // signal them when done
+		submitInfo.signalSemaphoreCount = 1;
+		submitInfo.pSignalSemaphores = signalSemaphores;
+
+		// submit the command buffer to the graphics queue
+		// m_inFlightFence will be GREEN when all submitted command buffers have finished execution
+		if (vkQueueSubmit(graphicsQueue, 1, &submitInfo, m_inFlightFences[currentFrame]) != VK_SUCCESS)
+		{
+			throw std::runtime_error("failed to submit draw command buffer!");
+		}
+
+		// now we need to present the rendered image to the screen
+		VkPresentInfoKHR presentInfo{};
+		presentInfo.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+		// wait on the render finished semaphore
+		presentInfo.waitSemaphoreCount = 1;
+		presentInfo.pWaitSemaphores = signalSemaphores;
+
+		// specify the swap chain to present to
+		VkSwapchainKHR swapChains[] = { m_swapChain };
+		presentInfo.swapchainCount = 1;
+		presentInfo.pSwapchains = swapChains;
+		// specify the image index to present
+		presentInfo.pImageIndices = &imageIndex;
+		presentInfo.pResults = nullptr; // optional
+		// present the image
+		vkQueuePresentKHR(presentationQueue, &presentInfo);
+		currentFrame = (currentFrame + 1) % MAX_FRAMES_IN_FLIGHT;
+	}
 
 	void cleanup()
-	{
+	{	
+		// delete the semaphores and fence
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			vkDestroySemaphore(m_device, m_imageAvailableSemaphores[i], nullptr);
+			vkDestroySemaphore(m_device, m_renderFinishedSemaphores[i], nullptr);
+			vkDestroyFence(m_device, m_inFlightFences[i], nullptr);
+		}
 		// delete the graphics command pool
 		vkDestroyCommandPool(m_device, m_commandPool, nullptr);
 
