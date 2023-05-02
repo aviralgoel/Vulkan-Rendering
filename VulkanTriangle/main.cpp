@@ -108,8 +108,8 @@ struct Vertex {
 	glm::vec2 pos;
 	glm::vec3 color;
 
+	// populating VkVertexInputBindingDescription struct
 	static VkVertexInputBindingDescription getBindingDescription() {
-
 		VkVertexInputBindingDescription bindingDescription{};
 		bindingDescription.binding = 0; // index of the binding in the array of bindings
 		bindingDescription.stride = sizeof(Vertex); // number of bytes from one entry to the next
@@ -118,15 +118,18 @@ struct Vertex {
 	}
 
 	// returns an array of 2 elements of type VkVertexInputAttributeDescription
+	// one for color and one for position
 	static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() {
 		
 		std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
 
+		// POSITION ATTRIBUTE
 		attributeDescriptions[0].binding = 0; // index of the binding in the array of bindings
 		attributeDescriptions[0].location = 0; // location of the attribute in the vertex shader
 		attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT; // format of the data
 		attributeDescriptions[0].offset = offsetof(Vertex, pos); // number of bytes since the start of the per-vertex data to read from
 
+		// COLOR ATTRIBUTE
 		attributeDescriptions[1].binding = 0; // index of the binding in the array of bindings
 		attributeDescriptions[1].location = 1; // location of the attribute in the vertex shader
 		attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT; // format of the data
@@ -137,13 +140,19 @@ struct Vertex {
 
 };
 
+// vertex information
 const std::vector<Vertex> vertices = 
 {	// position			color
-	 {{0.0f, -0.5f}, {1.0f, 1.0f, 1.0f}},
-	{{0.5f, 0.5f}, {0.0f, 1.0f, 0.0f}},
-	{{-0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}
+	 {{-0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}}, // bottom left R
+	{{0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}}, // bottom right G
+	{{0.5f, 0.5f}, {0.0f, 0.0f, 1.0f}}, // top right B
+	{{-0.5f, 0.5f}, {1.0f, 1.0f, 1.0f}} // top left W
 };
 
+const std::vector<uint16_t> indices = {
+	0, 1, 2, 
+	2, 3, 0
+};
 class HelloTriangleApplication {
 public:
 
@@ -220,6 +229,10 @@ private:
 	VkBuffer m_vertexBuffer;
 	// handle to store the memory for the vertex buffer
 	VkDeviceMemory m_vertexBufferMemory;
+	// handle to store the index buffer
+	VkBuffer m_indexBuffer;
+	// handle to store the memory for the index buffer
+	VkDeviceMemory m_indexBufferMemory;
 
 	void initWindow()
 	{
@@ -281,6 +294,8 @@ private:
 		createCommandPool();
 		// create vertex buffer
 		createVertexBuffer();
+		// create index buffer
+		createIndexBuffer();
 		// create command buffer
 		createCommandBuffers();
 		// creating semaphores and fences
@@ -870,21 +885,15 @@ private:
 		vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
 		// describe how our vertex data is structured
-		auto bindingDescription = Vertex::getBindingDescription(); // return VkVertexInputBindingDescription
-		auto attributeDescriptions = Vertex::getAttributeDescriptions(); // returns an array of two VkVertexInputAttributeDescription
+		VkVertexInputBindingDescription bindingDescription = Vertex::getBindingDescription(); 
+		std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions = Vertex::getAttributeDescriptions(); 
 
-
+		// tell our graphics pipeline how the vertex data is structured
 		vertexInputInfo.vertexBindingDescriptionCount = 1;
 		vertexInputInfo.pVertexBindingDescriptions = &bindingDescription; // Optional
-
 		vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
 		vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data(); // Optional
-
 		
-
-
-
-
 		// settings to configure the assembly of geometry from vertices
 		VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
 		inputAssembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
@@ -1053,36 +1062,142 @@ private:
 	}
 	void createVertexBuffer()
 	{
+		
+		VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+		// createBuffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+		//	m_vertexBuffer, m_vertexBufferMemory);
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+
+		// create a staging buffer to copy vertex data to before copying to the device local buffer
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			stagingBuffer, stagingBufferMemory);
+
+
+		// map staging buffer memory to a pointer so we can copy vertex data to it
+		void* data;
+		vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+		memcpy(data, vertices.data(), (size_t)bufferSize);
+		vkUnmapMemory(m_device, stagingBufferMemory);
+
+		// create a vertex buffer on the device local memory
+		 createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, 
+			 VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_vertexBuffer, m_vertexBufferMemory);
+
+		 // copy the staging buffer to the vertex buffer
+		 copyBuffer(stagingBuffer, m_vertexBuffer, bufferSize);
+
+		 vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+		 vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+
+	}
+	void createIndexBuffer()
+	{
+		VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+
+		// create a staging buffer to copy index data to before copying to the device local buffer
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+			stagingBuffer, stagingBufferMemory);
+
+
+		// map staging buffer memory to a pointer so we can copy index data to it
+		void* data;
+		vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
+		memcpy(data, indices.data(), (size_t)bufferSize);
+		vkUnmapMemory(m_device, stagingBufferMemory);
+
+		// create a index buffer on the device local memory
+		createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+			VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, m_indexBuffer, m_indexBufferMemory);
+
+		// copy the staging buffer to the vertex buffer
+		copyBuffer(stagingBuffer, m_indexBuffer, bufferSize);
+
+		vkDestroyBuffer(m_device, stagingBuffer, nullptr);
+		vkFreeMemory(m_device, stagingBufferMemory, nullptr);
+
+	}
+	void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size)
+	{
+		// create a command buffer for copy commands 
+		VkCommandBufferAllocateInfo allocInfo{};
+		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+		allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+		allocInfo.commandPool = m_commandPool;
+		allocInfo.commandBufferCount = 1;
+
+		// command buffer creation
+		VkCommandBuffer commandBuffer;
+		vkAllocateCommandBuffers(m_device, &allocInfo, &commandBuffer);
+
+		// begin recording commands
+		VkCommandBufferBeginInfo beginInfo{};
+		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+		vkBeginCommandBuffer(commandBuffer, &beginInfo);
+
+		VkBufferCopy copyRegion{};
+		copyRegion.srcOffset = 0; // soruce buffer offset
+		copyRegion.dstOffset = 0; // destination buffer offset
+		copyRegion.size = size; // size of data to copy
+
+		vkCmdCopyBuffer(commandBuffer, src, dst, 1, &copyRegion);
+		vkEndCommandBuffer(commandBuffer);
+
+		// execute these commands
+		VkSubmitInfo submitInfo{};
+		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+		submitInfo.commandBufferCount = 1;
+		submitInfo.pCommandBuffers = &commandBuffer;
+
+		// wait until all copying is done
+		vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
+		vkQueueWaitIdle(graphicsQueue);
+
+		// free command buffer
+		vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
+
+
+	}
+
+	// it creates a buffer based on the size required, the intended use of the buffer, and the properties of the memory
+	// last two parameters are the buffer and the memory object which are returned
+	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
+	{
+		// creating a buffer requires us to create VkBufferCreateInfo struct
 		VkBufferCreateInfo bufferInfo{};
 		bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-		bufferInfo.size = sizeof(vertices[0]) * vertices.size(); // size of the buffer
-		bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT; // buffer is used as a vertex buffer
+		bufferInfo.size =  size; // size of the buffer
+		bufferInfo.usage = usage; // buffer is used as a vertex buffer / staging buffer
 		bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE; // buffer is exclusive to a single queue (graphics) family at a time
 
-		// create vertex buffer
-		if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &m_vertexBuffer) != VK_SUCCESS) {
+		// create vertex/staging buffer
+		if (vkCreateBuffer(m_device, &bufferInfo, nullptr, &buffer) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create vertex buffer!");
 		}
 
+		// actually assign memory to it
 		VkMemoryRequirements memRequirements;
-		vkGetBufferMemoryRequirements(m_device, m_vertexBuffer, &memRequirements);
+		// give our buffer what kind of memory it needs
+		vkGetBufferMemoryRequirements(m_device, buffer, &memRequirements);
 
 		VkMemoryAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
-		allocInfo.allocationSize = memRequirements.size; // specify required memory size
-		allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, 
-				VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+		allocInfo.allocationSize = memRequirements.size; // size of required memory in bytes
+		// bitmask, Bit i is set iff the memory type i is supported
+		allocInfo.memoryTypeIndex = findMemoryType(memRequirements.memoryTypeBits, properties);
 
-		if (vkAllocateMemory(m_device, &allocInfo, nullptr, &m_vertexBufferMemory) != VK_SUCCESS) {
+		// device that owns the memory, allocation info like memory type and size, handle to store the memory
+		if (vkAllocateMemory(m_device, &allocInfo, nullptr, &bufferMemory) != VK_SUCCESS) {
 			throw std::runtime_error("failed to allocate vertex buffer memory!");
 		}
 
-		vkBindBufferMemory(m_device, m_vertexBuffer, m_vertexBufferMemory, 0);
-
-		void* data;
-		vkMapMemory(m_device, m_vertexBufferMemory, 0, bufferInfo.size, 0, &data);
-		memcpy(data, vertices.data(), (size_t)bufferInfo.size);
-		vkUnmapMemory(m_device, m_vertexBufferMemory);
+		// link the buffer with actual raw memory 
+		vkBindBufferMemory(m_device, buffer, bufferMemory, 0);
 
 
 	}
@@ -1099,6 +1214,8 @@ private:
 				return i;
 			}
 		}
+
+		
 
 	}
 	void createCommandBuffers()
@@ -1192,6 +1309,7 @@ private:
 	}
 	// writes the commands we want to execute into a command buffer
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
+		
 		//  begin recording the command buffer by calling vkBeginCommandBuffer
 		VkCommandBufferBeginInfo beginInfo{};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
@@ -1228,6 +1346,7 @@ private:
 		// The last two parameters specify the array of vertex buffers to bind and 
 		// the byte offsets to start reading vertex data from. 
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
+		vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT16);
 
 		// set dynamic viewport and scissor
 		VkViewport viewport{};
@@ -1245,7 +1364,8 @@ private:
 		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
 		// actual draw call
-		vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+		// vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
+		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
 
 		// end the render pass
 		vkCmdEndRenderPass(commandBuffer);
