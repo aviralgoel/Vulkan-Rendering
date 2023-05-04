@@ -14,6 +14,10 @@
 #include <fstream> // shader files i/o
 #include <glm/glm.hpp> // vec3 and vec2
 #include <array> // std::array
+#define GLM_FORCE_RADIANS
+#include <glm/glm.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <chrono>
 
 const uint32_t WINDOW_WIDTH = 800;
 const uint32_t WINDOW_HEIGHT = 600;
@@ -140,6 +144,12 @@ struct Vertex {
 
 };
 
+struct UniformBufferObject {
+	glm::mat4 model;
+	glm::mat4 view;
+	glm::mat4 proj;
+};
+
 // vertex information
 const std::vector<Vertex> vertices = 
 {	// position			color
@@ -200,6 +210,8 @@ private:
 	std::vector<VkImageView> m_swapChainImageViews;
 	// handle to render pass object
 	VkRenderPass m_renderPass;
+	// handle to the descriptor set layout
+	VkDescriptorSetLayout m_descriptorSetLayout;
 	// handle to uniform values
 	VkPipelineLayout m_pipelineLayout;
 	// final graphics pipeline
@@ -233,6 +245,12 @@ private:
 	VkBuffer m_indexBuffer;
 	// handle to store the memory for the index buffer
 	VkDeviceMemory m_indexBufferMemory;
+	// uniform buffer for every frame in flight
+	std::vector<VkBuffer> m_uniformBuffers;
+	// memory for the uniform buffer for every frame in flight
+	std::vector<VkDeviceMemory> m_uniformBuffersMemory;
+	// mapped memory for the uniform buffer for every frame in flight
+	std::vector<void*> m_uniformBuffersData;
 
 	void initWindow()
 	{
@@ -286,6 +304,8 @@ private:
 		createImageViews();
 		// create a render pass object
 		createRenderPass();
+		// create descriptor set layout
+		createDescriptorSetLayout();
 		// create graphics pipeline
 		createGraphicsPipeline();
 		// create framebuffers
@@ -296,6 +316,8 @@ private:
 		createVertexBuffer();
 		// create index buffer
 		createIndexBuffer();
+		// create uniform buffers
+		createUniformBuffers();
 		// create command buffer
 		createCommandBuffers();
 		// creating semaphores and fences
@@ -851,7 +873,24 @@ private:
 			throw std::runtime_error("failed to create render pass!");
 		}
 	}
+	void createDescriptorSetLayout()
+	{
+		VkDescriptorSetLayoutBinding uboLayoutBinding{};
+		uboLayoutBinding.binding = 0; // binding = 0 in the shader 
+		uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; // type of descriptor
+		uboLayoutBinding.descriptorCount = 1; // number of values in the array of descriptors
+		uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT; // shader stage to bind to
+		uboLayoutBinding.pImmutableSamplers = nullptr; // only relevant for image sampling
 
+		VkDescriptorSetLayoutCreateInfo layoutInfo{};
+		layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+		layoutInfo.bindingCount = 1; // number of bindings
+		layoutInfo.pBindings = &uboLayoutBinding; // pointer to the array of bindings
+
+		if (vkCreateDescriptorSetLayout(m_device, &layoutInfo, nullptr, &m_descriptorSetLayout) != VK_SUCCESS) {
+			throw std::runtime_error("failed to create descriptor set layout!");
+		}
+	}
 	void createGraphicsPipeline()
 	{
 		// piece of code to run for every vertex
@@ -976,8 +1015,9 @@ private:
 		// pipeline layout (empty for now)
 		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
 		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-		pipelineLayoutInfo.setLayoutCount = 0; // Optional
-		pipelineLayoutInfo.pSetLayouts = nullptr; // Optional
+		pipelineLayoutInfo.setLayoutCount = 1; // uniform layout
+		pipelineLayoutInfo.pSetLayouts = &m_descriptorSetLayout; // Optional
+
 		pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
 		pipelineLayoutInfo.pPushConstantRanges = 0; // Optional
 
@@ -1119,6 +1159,20 @@ private:
 		vkDestroyBuffer(m_device, stagingBuffer, nullptr);
 		vkFreeMemory(m_device, stagingBufferMemory, nullptr);
 
+	}
+	void createUniformBuffers() {
+		
+		VkDeviceSize size = sizeof(UniformBufferObject);	
+		m_uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
+		m_uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
+		m_uniformBuffersData.resize(MAX_FRAMES_IN_FLIGHT);
+
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			createBuffer(size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+								m_uniformBuffers[i], m_uniformBuffersMemory[i]);
+			vkMapMemory(m_device, m_uniformBuffersMemory[i], 0, size, 0, &m_uniformBuffersData[i]);
+		}
 	}
 	void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size)
 	{
@@ -1436,6 +1490,8 @@ private:
 		// begin recording the command buffer
 		recordCommandBuffer(m_commandBuffers[currentFrame], imageIndex);
 
+		updateUniformBuffer(currentFrame);
+
 		// submit the command buffer to the graphics queue
 		// we need to specify which semaphores to wait on before execution and which to signal when execution is done
 		VkSubmitInfo submitInfo{};
@@ -1496,7 +1552,6 @@ private:
 	{
 		// destroy the swap chain
 		cleanupSwapChain();
-		
 
 		vkDestroyPipeline(m_device, m_graphicsPipeline, nullptr);
 		// delete the pipeline layout (uniforms)
@@ -1507,6 +1562,16 @@ private:
 		// delete the vertex buffer and its memory
 		vkDestroyBuffer(m_device, m_vertexBuffer, nullptr);
 		vkFreeMemory(m_device, m_vertexBufferMemory, nullptr);
+
+		// delete all uniform buffers stuff
+		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+		{
+			vkDestroyBuffer(m_device, m_uniformBuffers[i], nullptr);
+			vkFreeMemory(m_device, m_uniformBuffersMemory[i], nullptr);
+		}
+
+		vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
+
 
 		// delete the semaphores and fence
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
@@ -1559,6 +1624,27 @@ private:
 		}
 		// delete the swap chain itself
 		vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
+	}
+
+	void updateUniformBuffer(uint32_t currentFrame)
+	{
+		static auto startTime = std::chrono::high_resolution_clock::now();
+		auto currentTime = std::chrono::high_resolution_clock::now();
+
+		float timeElapsed = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+		UniformBufferObject ubo{};
+		ubo.model = glm::rotate(glm::mat4(1.0f), timeElapsed * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)); // rotate 90 degrees per second around z axis
+		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), // camera position
+						glm::vec3(0.0f, 0.0f, 0.0f), // look at origin
+						glm::vec3(0.0f, 0.0f, 1.0f)); // up vector
+		ubo.proj = glm::perspective(glm::radians(45.0f), // field of view
+										m_swapChainExtent.width / (float)m_swapChainExtent.height, // aspect ratio
+										0.1f, // near plane
+										10.0f); // far plane
+		ubo.proj[1][1] *= -1;
+
+		memcpy(m_uniformBuffersData[currentFrame], &ubo, sizeof(ubo));
+
 	}
 	
 };
