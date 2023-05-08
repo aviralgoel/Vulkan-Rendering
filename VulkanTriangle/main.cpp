@@ -250,9 +250,8 @@ private:
 	// memory for the uniform buffer for every frame in flight
 	std::vector<VkDeviceMemory> m_uniformBuffersMemory;
 	// mapped memory for the uniform buffer for every frame in flight
-	std::vector<void*> m_uniformBuffersData;
-
-	VkDescriptorPool m_descriptorPool;
+	std::vector<void*> m_uniformBuffersData; // pointer to the mapped memory for the uniform buffer for every frame in flight
+	VkDescriptorPool m_descriptorPool; // pool of memory for descriptors
 	std::vector<VkDescriptorSet> m_descriptorSets;
 
 	void initWindow()
@@ -880,9 +879,10 @@ private:
 			throw std::runtime_error("failed to create render pass!");
 		}
 	}
+	// how are the descriptors going to be layed out (binding no, total count etc.)
 	void createDescriptorSetLayout()
 	{
-		VkDescriptorSetLayoutBinding uboLayoutBinding{};
+		VkDescriptorSetLayoutBinding uboLayoutBinding{}; 
 		uboLayoutBinding.binding = 0; // binding = 0 in the shader 
 		uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; // type of descriptor
 		uboLayoutBinding.descriptorCount = 1; // number of values in the array of descriptors
@@ -1019,7 +1019,7 @@ private:
 		colorBlending.blendConstants[2] = 0.0f; // Optional
 		colorBlending.blendConstants[3] = 0.0f; // Optional
 
-		// pipeline layout (empty for now)
+		// pipeline layout (information about descriptor layouts)
 		VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
 		pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
 		pipelineLayoutInfo.setLayoutCount = 1; // uniform layout
@@ -1169,11 +1169,13 @@ private:
 	}
 	void createUniformBuffers() {
 		
+
 		VkDeviceSize size = sizeof(UniformBufferObject);	
 		m_uniformBuffers.resize(MAX_FRAMES_IN_FLIGHT);
 		m_uniformBuffersMemory.resize(MAX_FRAMES_IN_FLIGHT);
 		m_uniformBuffersData.resize(MAX_FRAMES_IN_FLIGHT);
 
+		// create a uniform buffer for each frame in flight
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
 		{
 			createBuffer(size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
@@ -1281,36 +1283,45 @@ private:
 	}
 	void createDescriptorPool() {
 		
+		// type and number of descriptors that are going to be there
 		VkDescriptorPoolSize poolSize{};
 		poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSize.descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 
+		// create the pool
 		VkDescriptorPoolCreateInfo poolInfo{};
 		poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
 		poolInfo.poolSizeCount = 1;
 		poolInfo.pPoolSizes = &poolSize;
-
+		// maximum number of descriptor sets that may be allocated:
 		poolInfo.maxSets = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
 		
+		// create the pool
 		if (vkCreateDescriptorPool(m_device, &poolInfo, nullptr, &m_descriptorPool) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create descriptor pool!");
 		}
 
 	}
 	void createDescriptorSets()
-	{
+	{	
+		// array of descriptor set layout
 		std::vector<VkDescriptorSetLayout> layouts(MAX_FRAMES_IN_FLIGHT, m_descriptorSetLayout);
+
+		// allocate the descriptor sets
 		VkDescriptorSetAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-		allocInfo.descriptorPool = m_descriptorPool;
+		allocInfo.descriptorPool = m_descriptorPool; // pool to allocate from
 		allocInfo.descriptorSetCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
-		allocInfo.pSetLayouts = layouts.data();
+		allocInfo.pSetLayouts = layouts.data(); // array of layouts
 
+		// allocate the descriptor sets
 		m_descriptorSets.resize(MAX_FRAMES_IN_FLIGHT);
 		if (vkAllocateDescriptorSets(m_device, &allocInfo, m_descriptorSets.data()) != VK_SUCCESS) {
 			throw std::runtime_error("failed to allocate descriptor sets!");
 		}
 
+		// POOL -> LAYOUT -> SETS -> BINDING -> BUFFER -> MEMORY
+		// CONFIGURE EACH DESCRIPTOR SET
 		for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) {
 			VkDescriptorBufferInfo bufferInfo{};
 			bufferInfo.buffer = m_uniformBuffers[i];
@@ -1479,6 +1490,7 @@ private:
 		scissor.extent = m_swapChainExtent;
 		vkCmdSetScissor(commandBuffer, 0, 1, &scissor);
 
+		// bind the descriptor sets
 		vkCmdBindDescriptorSets(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_pipelineLayout, 0, 1, &m_descriptorSets[currentFrame], 0, nullptr);
 
 		// actual draw call
@@ -1553,8 +1565,8 @@ private:
 		vkResetCommandBuffer(m_commandBuffers[currentFrame], 0);
 		// begin recording the command buffer
 		recordCommandBuffer(m_commandBuffers[currentFrame], imageIndex);
-
-		updateUniformBuffer(imageIndex);
+		// update the uniform buffer (MVP matrix)
+		updateUniformBuffer(currentFrame);
 
 		// submit the command buffer to the graphics queue
 		// we need to specify which semaphores to wait on before execution and which to signal when execution is done
@@ -1697,10 +1709,12 @@ private:
 
 	void updateUniformBuffer(uint32_t currentImage)
 	{
+		// update happen independent of frame rate
 		static auto startTime = std::chrono::high_resolution_clock::now();
 		auto currentTime = std::chrono::high_resolution_clock::now();
-
 		float timeElapsed = std::chrono::duration<float, std::chrono::seconds::period>(currentTime - startTime).count();
+
+
 		UniformBufferObject ubo{};
 		ubo.model = glm::rotate(glm::mat4(1.0f), timeElapsed * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f)); // rotate 90 degrees per second around z axis
 		ubo.view = glm::lookAt(glm::vec3(2.0f, 2.0f, 2.0f), // camera position
@@ -1712,6 +1726,7 @@ private:
 										10.0f); // far plane
 		ubo.proj[1][1] *= -1;
 
+		// copy the updated MVP matrix to the uniform buffer memory 
 		memcpy(m_uniformBuffersData[currentImage], &ubo, sizeof(ubo));
 
 	}
