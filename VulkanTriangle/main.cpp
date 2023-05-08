@@ -18,6 +18,8 @@
 #include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 #include <chrono>
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb_image.h>
 
 const uint32_t WINDOW_WIDTH = 800;
 const uint32_t WINDOW_HEIGHT = 600;
@@ -254,6 +256,10 @@ private:
 	VkDescriptorPool m_descriptorPool; // pool of memory for descriptors
 	std::vector<VkDescriptorSet> m_descriptorSets;
 
+	// texturing
+	VkImage m_textureImage;
+	VkDeviceMemory m_textureImageMemory;
+
 	void initWindow()
 	{
 		// initialize glfw library
@@ -314,6 +320,8 @@ private:
 		createFramebuffers();
 		// create command pool to manage memory for future command buffers
 		createCommandPool();
+		// create texture image
+		createTextureImage();
 		// create vertex buffer
 		createVertexBuffer();
 		// create index buffer
@@ -1106,6 +1114,53 @@ private:
 		if (vkCreateCommandPool(m_device, &poolInfo, nullptr, &m_commandPool) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create graphics command pool!");
 		}
+	}
+	void createTextureImage()
+	{
+		// load image data from file
+		int texWidth, texHeight, texChannels;
+		stbi_uc* pixels = stbi_load("textures/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+		// calculate image size in bytes
+		VkDeviceSize imageSize = texWidth * texHeight * 4; // 4 bytes per pixel
+
+		if (!pixels) {
+			throw std::runtime_error("failed to load texture image!");
+		}
+
+		// create a staging buffer (on CPU ) to copy the image data to before copying to the device local buffer (on GPU)
+		VkBuffer stagingBuffer;
+		VkDeviceMemory stagingBufferMemory;
+
+		// create the staging buffer (required size of the buffer, will be used as SOURCE of a transfer command,
+		// can be used for mapping and flushing not necceary, output results)
+		createBuffer(imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+						stagingBuffer, stagingBufferMemory);
+
+		// map staging buffer memory to a pointer so we can copy image data to it
+		void* data;
+		vkMapMemory(m_device, stagingBufferMemory, 0, imageSize, 0, &data);
+		memcpy(data, pixels, static_cast<size_t>(imageSize));
+		vkUnmapMemory(m_device, stagingBufferMemory);
+
+		// free the image data
+		stbi_image_free(pixels);
+
+		//// create the image
+		//createImage(texWidth, texHeight, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_TILING_OPTIMAL,
+		//				VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
+		//				m_textureImage, m_textureImageMemory);
+
+		//// transition the image to VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL so we can copy data to it
+		//transitionImageLayout(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+
+		//// copy the staging buffer to the texture image
+		//copyBufferToImage(stagingBuffer, m_textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+
+		//// transition the texture image to VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL for shader access
+		//transitionImageLayout(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+		//// destroy the staging buffer
+		//vk
 	}
 	void createVertexBuffer()
 	{
