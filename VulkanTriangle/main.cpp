@@ -255,8 +255,8 @@ private:
 	std::vector<VkDescriptorSet> m_descriptorSets;
 
 	// texturing
-	VkImage m_textureImage;
-	VkDeviceMemory m_textureImageMemory;
+	VkImage m_textureImage; // handle for the image
+	VkDeviceMemory m_textureImageMemory; // memory for the texture image
 
 	void initWindow()
 	{
@@ -1109,10 +1109,12 @@ private:
 			throw std::runtime_error("failed to create graphics command pool!");
 		}
 	}
+	// load an image from file and upload it to Vulkan Image Object
 	void createTextureImage()
 	{
 		// store texture image width, height and number of color channels
 		int texWidth, texHeight, texChannels;
+		// load the image data from file
 		stbi_uc* pixels = stbi_load("textures/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 		// calculate image size in bytes
 		VkDeviceSize imageSize = texWidth * texHeight * 4; // 4 bytes per pixel
@@ -1120,6 +1122,8 @@ private:
 		if (!pixels) {
 			throw std::runtime_error("failed to load texture image!");
 		}
+
+		// VkBuffer is a logical abstraction for data storage, whereas VkDeviceMemory is a physical representation of memory on the device.
 
 		// create a staging buffer (on CPU ) to copy the image data to before copying to the device local buffer (on GPU)
 		VkBuffer stagingBuffer;
@@ -1131,6 +1135,7 @@ private:
 			stagingBuffer, stagingBufferMemory);
 
 		// map staging buffer memory to a pointer so we can copy image data to it
+		// The reason for mapping and unmapping memory is to ensure that the CPU and GPU can access the same memory regions without conflicts. 
 		void* data;
 		vkMapMemory(m_device, stagingBufferMemory, 0, imageSize, 0, &data);
 		memcpy(data, pixels, static_cast<size_t>(imageSize));
@@ -1146,7 +1151,10 @@ private:
 
 		// change the layout of the image from old to a new one which is better for GPU
 		transitionImageLayout(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+		// copy image data to VkImage object
 		copyBufferToImage(stagingBuffer, m_textureImage, static_cast<uint32_t>(texWidth), static_cast<uint32_t>(texHeight));
+
+		// change the layout of this image object for opitmal GPU access
 		transitionImageLayout(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
 		vkDestroyBuffer(m_device, stagingBuffer, nullptr);
@@ -1176,7 +1184,8 @@ private:
 
 	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling imageTiling, VkImageUsageFlags usageFlags,
 		VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
-	{
+	{	
+		// create an image object 
 		VkImageCreateInfo imageInfo{};
 		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		imageInfo.imageType = VK_IMAGE_TYPE_2D; // 2D image
@@ -1197,6 +1206,7 @@ private:
 			throw std::runtime_error("failed to create image!");
 		}
 
+		// actually creating internal memory for the image object
 		// settings for allocate memory for the image
 		VkMemoryRequirements memRequirements;
 		vkGetImageMemoryRequirements(m_device, image, &memRequirements);
@@ -1286,8 +1296,10 @@ private:
 			vkMapMemory(m_device, m_uniformBuffersMemory[i], 0, size, 0, &m_uniformBuffersData[i]);
 		}
 	}
+	// 
 	void copyBuffer(VkBuffer src, VkBuffer dst, VkDeviceSize size)
 	{
+		// make a one time command buffer to submit copy command
 		VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
 		VkBufferCopy copyRegion{};
@@ -1295,10 +1307,13 @@ private:
 		copyRegion.dstOffset = 0; // destination buffer offset
 		copyRegion.size = size; // size of data to copy
 
+		// command to copy data from one buffer to other buffer
 		vkCmdCopyBuffer(commandBuffer, src, dst, 1, &copyRegion);
 
+		// end the command buffer
 		endSingleTimeCommands(commandBuffer);
 	}
+	// create a single use command buffer from the command pool 
 	VkCommandBuffer beginSingleTimeCommands() {
 		VkCommandBufferAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1313,36 +1328,46 @@ private:
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
+		// the command buffer is ready to accept commands, and any subsequent Vulkan commands issued will be recorded into the buffer 
+		// until vkEndCommandBuffer is called to finalize the buffer recording.
 		vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
 		return commandBuffer;
 	}
 
 	void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
+
+		// end accepting more commands into the command buffer
 		vkEndCommandBuffer(commandBuffer);
+
 
 		VkSubmitInfo submitInfo{};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 		submitInfo.commandBufferCount = 1;
 		submitInfo.pCommandBuffers = &commandBuffer;
 
+		// submit whatever commands are in the commandBuffer to the queue
 		vkQueueSubmit(graphicsQueue, 1, &submitInfo, VK_NULL_HANDLE);
 		vkQueueWaitIdle(graphicsQueue);
 
+		// destroy the command buffer
 		vkFreeCommandBuffers(m_device, m_commandPool, 1, &commandBuffer);
 	}
+	// converts an VkImage object with a particular format and a layout to another VkImage object with a different layout
 	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
+		
+		// start a command buffer
 		VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
 		VkImageMemoryBarrier barrier{};
 		barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
 		barrier.oldLayout = oldLayout;
 		barrier.newLayout = newLayout;
-		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED; // used for transfer queue ownership
+		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED; // not applicable in our case
 		barrier.image = image;
 		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		barrier.subresourceRange.baseMipLevel = 0;
+		barrier.subresourceRange.baseMipLevel = 0; 
 		barrier.subresourceRange.levelCount = 1;
 		barrier.subresourceRange.baseArrayLayer = 0;
 		barrier.subresourceRange.layerCount = 1;
@@ -1350,13 +1375,15 @@ private:
 		VkPipelineStageFlags sourceStage;
 		VkPipelineStageFlags destinationStage;
 
+		// will happen when we copy data from CPU to VkImage
 		if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
 			barrier.srcAccessMask = 0;
 			barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-			sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+			sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT; 
 			destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 		}
+		// will happen when we copy data from VkImage to GPU memory
 		else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
 			barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 			barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
@@ -1369,8 +1396,9 @@ private:
 		}
 
 		vkCmdPipelineBarrier(
-			commandBuffer,
-			sourceStage, destinationStage,
+			commandBuffer, // 
+			sourceStage, // in which pipeline stage the operations occur that should happen before the barrier
+			destinationStage,  // specifies the pipeline stage in which operations will wait on the barrier. 
 			0,
 			0, nullptr,
 			0, nullptr,
