@@ -1,5 +1,5 @@
 ﻿  main.cpp
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(388,1): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(507,21): warning C4018: '<': signed/unsigned mismatch
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(1457): warning C4715: 'HelloTriangleApplication::findMemoryType': not all control paths return a value
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(394,1): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(513,21): warning C4018: '<': signed/unsigned mismatch
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(1494): warning C4715: 'HelloTriangleApplication::findMemoryType': not all control paths return a value
   VulkanTriangle.vcxproj -> C:\Users\avira\source\repos\VulkanTriangle\x64\Debug\VulkanTriangle.exe
