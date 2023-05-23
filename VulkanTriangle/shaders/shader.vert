@@ -16,7 +16,7 @@ layout(binding=0) uniform UniformBufferObject {
 
 void main() {
     // gl_Position and gl_VertexIndex are built in
-    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(in_Postion, 1.0);
+    gl_Position = ubo.proj * ubo.view * ubo.model * vec4(in_Postion, 1.0);  // (x,y,z, 1) homegenous
     fragColor = in_Color;
 	fragTexCoord = in_TexCoords;
 }

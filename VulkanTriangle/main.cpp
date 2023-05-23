@@ -112,7 +112,7 @@ struct SwapChainSupportDetails {
 };
 
 struct Vertex {
-	glm::vec3 pos;
+	glm::vec3 pos; // position (x, y, z)
 	glm::vec3 color;
 	glm::vec2 texCoords;
 
@@ -133,7 +133,7 @@ struct Vertex {
 		// POSITION ATTRIBUTE
 		attributeDescriptions[0].binding = 0; // index of the binding in the array of bindings
 		attributeDescriptions[0].location = 0; // location of the attribute in the vertex shader
-		attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT; // format of the data
+		attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT; // format of the data (32 bit for x, y and z)
 		attributeDescriptions[0].offset = offsetof(Vertex, pos); // number of bytes since the start of the per-vertex data to read from
 
 		// COLOR ATTRIBUTE
@@ -161,6 +161,7 @@ struct UniformBufferObject {
 // vertex information
 const std::vector<Vertex> vertices = {
 
+	// (x, y, z), (r, g, b), (u, v)
 	{ {-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
 	{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
 	{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
@@ -1168,7 +1169,8 @@ private:
 	}
 	void createDepthResources()
 	{	
-
+		// takes a list of candidate formats in order from most desirable to least desirable, 
+		// and checks which is the first one that is supported:
 		VkFormat depthFormat = findDepthFormat();
 		createImage(m_swapChainExtent.width, m_swapChainExtent.height, 
 			depthFormat, VK_IMAGE_TILING_OPTIMAL,
@@ -1200,8 +1202,12 @@ private:
 	VkFormat findDepthFormat()
 	{
 		return findSupportedDepthFormat(
-			{ VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT },
-			VK_IMAGE_TILING_OPTIMAL, VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+			{ VK_FORMAT_D32_SFLOAT, 
+			VK_FORMAT_D32_SFLOAT_S8_UINT, 
+			VK_FORMAT_D24_UNORM_S8_UINT 
+			},
+			VK_IMAGE_TILING_OPTIMAL, // tiling mode
+			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT // features
 		);
 	}
 	bool hasStencilComponent(VkFormat format)
@@ -1279,6 +1285,7 @@ private:
 
 		endSingleTimeCommands(commandBuffer);
 	}
+	// creates an image with desired widht, height, format, tiling, usage, memory properties
 	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling imageTiling, VkImageUsageFlags usageFlags,
 		VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
 	{	

@@ -1,6 +1,5 @@
 ﻿  main.cpp
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(418,1): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(537,21): warning C4018: '<': signed/unsigned mismatch
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(1608): warning C4715: 'HelloTriangleApplication::findMemoryType': not all control paths return a value
-LINK : warning LNK4098: defaultlib 'MSVCRT' conflicts with use of other libs; use /NODEFAULTLIB:library
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(419,1): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(538,21): warning C4018: '<': signed/unsigned mismatch
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(1609): warning C4715: 'HelloTriangleApplication::findMemoryType': not all control paths return a value
   VulkanTriangle.vcxproj -> C:\Users\avira\source\repos\VulkanTriangle\x64\Debug\VulkanTriangle.exe
