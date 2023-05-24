@@ -310,7 +310,7 @@ private:
 	VkImageView m_depthImageView; // image view for the depth image
 
 	// mipmapping
-	uint32_t m_mipLevels;
+	uint32_t m_mipLevels; // number of mip levels possible
 
 	void initWindow()
 	{
@@ -1409,7 +1409,7 @@ private:
 		samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS; // comparison operation to use
 
 		samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-		samplerInfo.minLod = static_cast<float>(m_mipLevels/2); // Optional
+		samplerInfo.minLod = 8; // Optional
 		samplerInfo.maxLod = static_cast<float>(m_mipLevels);
 		samplerInfo.mipLodBias = 0.0f; // Optional
 
