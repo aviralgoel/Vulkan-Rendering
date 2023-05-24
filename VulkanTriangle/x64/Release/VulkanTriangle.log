@@ -1,9 +1,10 @@
 ﻿  main.cpp
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(418,1): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
-C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(537,21): warning C4018: '<': signed/unsigned mismatch
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(430,1): warning C4267: 'argument': conversion from 'size_t' to 'int', possible loss of data
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(549,21): warning C4018: '<': signed/unsigned mismatch
   Generating code
-  17 of 1758 functions ( 1.0%) were compiled, the rest were copied from previous compilation.
-    7 functions were new in current compilation
-    9 functions had inline decision re-evaluated but remain unchanged
+C:\Users\avira\source\repos\VulkanTriangle\VulkanTriangle\main.cpp(1668): warning C4715: 'HelloTriangleApplication::findMemoryType': not all control paths return a value
+  1855 of 3084 functions (60.1%) were compiled, the rest were copied from previous compilation.
+    1396 functions were new in current compilation
+    223 functions had inline decision re-evaluated but remain unchanged
   Finished generating code
   VulkanTriangle.vcxproj -> C:\Users\avira\source\repos\VulkanTriangle\x64\Release\VulkanTriangle.exe

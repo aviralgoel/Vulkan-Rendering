@@ -21,10 +21,17 @@
 #define STB_IMAGE_IMPLEMENTATION
 #define GLM_FORCE_DEPTH_ZERO_TO_ONE
 #include <stb_image.h>
+#define TINYOBJLOADER_IMPLEMENTATION
+#include <tiny_obj_loader.h>
+#include <unordered_map>
+#define GLM_ENABLE_EXPERIMENTAL
+#include <glm/gtx/hash.hpp>
 
 const uint32_t WINDOW_WIDTH = 800;
 const uint32_t WINDOW_HEIGHT = 600;
 const int MAX_FRAMES_IN_FLIGHT = 2;
+const std::string MODEL_PATH = "models/viking_room.obj";
+const std::string TEXTURE_PATH = "textures/viking_room.png";
 
 // names of validation layers to enable
 const std::vector<const char*> validationLayers = {
@@ -150,7 +157,21 @@ struct Vertex {
 
 		return attributeDescriptions;
 	}
+	bool operator == (const Vertex& other) const
+	{
+		return pos == other.pos && color == other.color && texCoords == other.texCoords;
+	}
 };
+
+namespace std {
+	template<> struct hash<Vertex> {
+		size_t operator()(Vertex const& vertex) const {
+			return ((hash<glm::vec3>()(vertex.pos) ^
+				(hash<glm::vec3>()(vertex.color) << 1)) >> 1) ^
+				(hash<glm::vec2>()(vertex.texCoords) << 1);
+		}
+	};
+}
 
 struct UniformBufferObject {
 	alignas(16) glm::mat4 model;
@@ -159,28 +180,26 @@ struct UniformBufferObject {
 };
 
 // vertex information
-const std::vector<Vertex> vertices = {
+//const std::vector<Vertex> vertices = {
+//
+//	// (x, y, z), (r, g, b), (u, v)
+//	{ {-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+//	{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+//	{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+//	{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
+//
+//	{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
+//	{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
+//	{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
+//	{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
+//};
 
-	// (x, y, z), (r, g, b), (u, v)
-	{ {-0.5f, -0.5f, 0.0f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-	{{0.5f, -0.5f, 0.0f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-	{{0.5f, 0.5f, 0.0f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-	{{-0.5f, 0.5f, 0.0f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}},
-
-	{{-0.5f, -0.5f, -0.5f}, {1.0f, 0.0f, 0.0f}, {0.0f, 0.0f}},
-	{{0.5f, -0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}, {1.0f, 0.0f}},
-	{{0.5f, 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}, {1.0f, 1.0f}},
-	{{-0.5f, 0.5f, -0.5f}, {1.0f, 1.0f, 1.0f}, {0.0f, 1.0f}}
-};
-
-
-
-const std::vector<uint16_t> indices = {
-	0, 1, 2,
-	2, 3, 0,
-	4, 5, 6,
-	6, 7, 4
-};
+//const std::vector<uint16_t> indices = {
+//	0, 1, 2,
+//	2, 3, 0,
+//	4, 5, 6,
+//	6, 7, 4
+//};
 class HelloTriangleApplication {
 public:
 
@@ -254,6 +273,13 @@ private:
 
 	// flag to check if the window has been resized
 	bool framebufferResized = false;
+
+	// list of vertices
+	std::vector<Vertex> m_vertices;
+	// list of unique vertices
+	std::unordered_map<Vertex, uint32_t> m_uniqueVertices;
+	// list of indices
+	std::vector<uint32_t> m_indices;
 
 	// handle to store the vertex buffer
 	VkBuffer m_vertexBuffer;
@@ -350,6 +376,8 @@ private:
 		createTextureImageView();
 		// create texture sampler
 		createTextureSampler();
+		// load model
+		loadModel();
 		// create vertex buffer
 		createVertexBuffer();
 		// create index buffer
@@ -857,7 +885,7 @@ private:
 		}
 	}
 	void createRenderPass()
-	{	
+	{
 		// attaching depth attachment
 		VkAttachmentDescription depthAttachment{};
 		depthAttachment.format = findDepthFormat();
@@ -873,6 +901,7 @@ private:
 		depthAttachmentReference.attachment = 1;
 		depthAttachmentReference.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+		// attaching color attachment
 		VkAttachmentDescription colorAttachment{};
 		colorAttachment.format = m_swapChainImageFormat; // same as the swap chain image format
 		colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT; // no multisampling
@@ -1103,7 +1132,7 @@ private:
 		pipelineInfo.pViewportState = &viewportState; // Optional
 		pipelineInfo.pRasterizationState = &rasterizer;
 		pipelineInfo.pMultisampleState = &multisampling;
-		pipelineInfo.pDepthStencilState = &depthStencil; // Optional
+		pipelineInfo.pDepthStencilState = &depthStencil; // depth buffer
 		pipelineInfo.pColorBlendState = &colorBlending;
 		pipelineInfo.pDynamicState = &dynamicState; // viewport and scissor
 		pipelineInfo.layout = m_pipelineLayout;
@@ -1121,15 +1150,14 @@ private:
 		vkDestroyShaderModule(m_device, vertShaderModule, nullptr);
 	}
 	void createFramebuffers()
-	{	
+	{
 		// resize the framebuffer array to fit the number of swapchain images
 		m_swapChainFramebuffers.resize(m_swapChainImageViews.size());
-
 
 		// create a framebuffer for each swapchain image
 		for (size_t i = 0; i < m_swapChainImageViews.size(); i++) {
 			// create a framebuffer for each swapchain image
-			std::array<VkImageView, 2> attachments = { m_swapChainImageViews[i], m_depthImageView};
+			std::array<VkImageView, 2> attachments = { m_swapChainImageViews[i], m_depthImageView };
 
 			VkFramebufferCreateInfo framebufferInfo{};
 			framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -1168,13 +1196,13 @@ private:
 		}
 	}
 	void createDepthResources()
-	{	
-		// takes a list of candidate formats in order from most desirable to least desirable, 
+	{
+		// takes a list of candidate formats in order from most desirable to least desirable,
 		// and checks which is the first one that is supported:
 		VkFormat depthFormat = findDepthFormat();
-		createImage(m_swapChainExtent.width, m_swapChainExtent.height, 
+		createImage(m_swapChainExtent.width, m_swapChainExtent.height,
 			depthFormat, VK_IMAGE_TILING_OPTIMAL,
-						VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, 
+			VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT,
 			m_depthImage, m_depthImageMemory);
 		m_depthImageView = createImageView(m_depthImage, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
 	}
@@ -1187,24 +1215,23 @@ private:
 			vkGetPhysicalDeviceFormatProperties(physicalDevice, format, &properties);
 
 			// if the format is supported for the given tiling mode and features
-			if (tiling == VK_IMAGE_TILING_LINEAR && (properties.linearTilingFeatures & feature) == feature) 
+			if (tiling == VK_IMAGE_TILING_LINEAR && (properties.linearTilingFeatures & feature) == feature)
 			{
 				return format;
 			}
-			else if (tiling == VK_IMAGE_TILING_OPTIMAL && (properties.optimalTilingFeatures & feature) == feature) 
+			else if (tiling == VK_IMAGE_TILING_OPTIMAL && (properties.optimalTilingFeatures & feature) == feature)
 			{
 				return format;
 			}
 		}
 		throw std::runtime_error("failed to find supported format!");
-
 	}
 	VkFormat findDepthFormat()
 	{
 		return findSupportedDepthFormat(
-			{ VK_FORMAT_D32_SFLOAT, 
-			VK_FORMAT_D32_SFLOAT_S8_UINT, 
-			VK_FORMAT_D24_UNORM_S8_UINT 
+			{ VK_FORMAT_D32_SFLOAT,
+			VK_FORMAT_D32_SFLOAT_S8_UINT,
+			VK_FORMAT_D24_UNORM_S8_UINT
 			},
 			VK_IMAGE_TILING_OPTIMAL, // tiling mode
 			VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT // features
@@ -1221,7 +1248,8 @@ private:
 		// store texture image width, height and number of color channels
 		int texWidth, texHeight, texChannels;
 		// load the image data from file
-		stbi_uc* pixels = stbi_load("textures/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+		// stbi_uc* pixels = stbi_load("textures/texture.jpg", &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+		stbi_uc* pixels = stbi_load(TEXTURE_PATH.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
 		// calculate image size in bytes
 		VkDeviceSize imageSize = texWidth * texHeight * 4; // 4 bytes per pixel
 
@@ -1241,7 +1269,7 @@ private:
 			stagingBuffer, stagingBufferMemory);
 
 		// map staging buffer memory to a pointer so we can copy image data to it
-		// The reason for mapping and unmapping memory is to ensure that the CPU and GPU can access the same memory regions without conflicts. 
+		// The reason for mapping and unmapping memory is to ensure that the CPU and GPU can access the same memory regions without conflicts.
 		void* data;
 		vkMapMemory(m_device, stagingBufferMemory, 0, imageSize, 0, &data);
 		memcpy(data, pixels, static_cast<size_t>(imageSize));
@@ -1267,7 +1295,6 @@ private:
 		vkFreeMemory(m_device, stagingBufferMemory, nullptr);
 	}
 	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height) {
-		
 		VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
 		VkBufferImageCopy region{};
@@ -1288,8 +1315,8 @@ private:
 	// creates an image with desired widht, height, format, tiling, usage, memory properties
 	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling imageTiling, VkImageUsageFlags usageFlags,
 		VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory)
-	{	
-		// create an image object 
+	{
+		// create an image object
 		VkImageCreateInfo imageInfo{};
 		imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
 		imageInfo.imageType = VK_IMAGE_TYPE_2D; // 2D image
@@ -1331,10 +1358,9 @@ private:
 	void createTextureImageView()
 	{
 		m_textureImageView = createImageView(m_textureImage, VK_FORMAT_R8G8B8A8_SRGB, VK_IMAGE_ASPECT_COLOR_BIT);
-
 	}
 	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags)
-	{	
+	{
 		VkImageView imageView;
 		VkImageViewCreateInfo viewInfo{};
 		viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1383,11 +1409,54 @@ private:
 		if (vkCreateSampler(m_device, &samplerInfo, nullptr, &m_textureSampler) != VK_SUCCESS) {
 			throw std::runtime_error("failed to create texture sampler!");
 		}
+	}
+	void loadModel()
+	{	// The attrib container holds all of the positions, normals and texture coordinates
+		// in its attrib.vertices, attrib.normals and attrib.texcoords vectors.
+		tinyobj::attrib_t attrib; // contains all vertex data
+		std::vector<tinyobj::shape_t> shapes;;
+		std::vector<tinyobj::material_t> materials;
+		std::string warn, err;
 
+		if (!tinyobj::LoadObj(&attrib, &shapes, &materials, &warn, &err, MODEL_PATH.c_str()))
+		{
+			throw std::runtime_error(warn + err);
+		}
+
+		// for all faces
+		for (const auto& shape : shapes)
+		{
+			for (const auto& index : shape.mesh.indices)
+			{
+				// fetch the vertex data from the attrib container
+				Vertex vertex{};
+				vertex.pos = {
+				attrib.vertices[3 * index.vertex_index + 0],
+				attrib.vertices[3 * index.vertex_index + 1],
+				attrib.vertices[3 * index.vertex_index + 2]
+				};
+
+				vertex.texCoords = {
+					attrib.texcoords[2 * index.texcoord_index + 0],
+					1 - attrib.texcoords[2 * index.texcoord_index + 1]
+				};
+
+				vertex.color = { 1.0f, 1.0f, 1.0f };
+
+				// is this vertex unique?
+				if (m_uniqueVertices.count(vertex) == 0)
+				{
+					// key:: actual vertex, value:: index of vertex in m_vertices
+					m_uniqueVertices[vertex] = static_cast<uint32_t>(m_vertices.size());
+					m_vertices.push_back(vertex);
+				}
+				m_indices.push_back(m_uniqueVertices[vertex]);
+			}
+		}
 	}
 	void createVertexBuffer()
 	{
-		VkDeviceSize bufferSize = sizeof(vertices[0]) * vertices.size();
+		VkDeviceSize bufferSize = sizeof(m_vertices[0]) * m_vertices.size();
 		// createBuffer(bufferSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
 		//	m_vertexBuffer, m_vertexBufferMemory);
 		VkBuffer stagingBuffer;
@@ -1400,7 +1469,7 @@ private:
 		// map staging buffer memory to a pointer so we can copy vertex data to it
 		void* data;
 		vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, vertices.data(), (size_t)bufferSize);
+		memcpy(data, m_vertices.data(), (size_t)bufferSize);
 		vkUnmapMemory(m_device, stagingBufferMemory);
 
 		// create a vertex buffer on the device local memory
@@ -1415,7 +1484,7 @@ private:
 	}
 	void createIndexBuffer()
 	{
-		VkDeviceSize bufferSize = sizeof(indices[0]) * indices.size();
+		VkDeviceSize bufferSize = sizeof(m_indices[0]) * m_indices.size();
 
 		VkBuffer stagingBuffer;
 		VkDeviceMemory stagingBufferMemory;
@@ -1427,7 +1496,7 @@ private:
 		// map staging buffer memory to a pointer so we can copy index data to it
 		void* data;
 		vkMapMemory(m_device, stagingBufferMemory, 0, bufferSize, 0, &data);
-		memcpy(data, indices.data(), (size_t)bufferSize);
+		memcpy(data, m_indices.data(), (size_t)bufferSize);
 		vkUnmapMemory(m_device, stagingBufferMemory);
 
 		// create a index buffer on the device local memory
@@ -1439,8 +1508,6 @@ private:
 
 		vkDestroyBuffer(m_device, stagingBuffer, nullptr);
 		vkFreeMemory(m_device, stagingBufferMemory, nullptr);
-
-
 	}
 	void createUniformBuffers() {
 		VkDeviceSize size = sizeof(UniformBufferObject);
@@ -1472,7 +1539,7 @@ private:
 		// end the command buffer
 		endSingleTimeCommands(commandBuffer);
 	}
-	// create a single use command buffer from the command pool 
+	// create a single use command buffer from the command pool
 	VkCommandBuffer beginSingleTimeCommands() {
 		VkCommandBufferAllocateInfo allocInfo{};
 		allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
@@ -1487,17 +1554,15 @@ private:
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-		// the command buffer is ready to accept commands, and any subsequent Vulkan commands issued will be recorded into the buffer 
+		// the command buffer is ready to accept commands, and any subsequent Vulkan commands issued will be recorded into the buffer
 		// until vkEndCommandBuffer is called to finalize the buffer recording.
 		vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
 		return commandBuffer;
 	}
 	void endSingleTimeCommands(VkCommandBuffer commandBuffer) {
-
 		// end accepting more commands into the command buffer
 		vkEndCommandBuffer(commandBuffer);
-
 
 		VkSubmitInfo submitInfo{};
 		submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
@@ -1513,7 +1578,6 @@ private:
 	}
 	// converts an VkImage object with a particular format and a layout to another VkImage object with a different layout
 	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout) {
-		
 		// start a command buffer
 		VkCommandBuffer commandBuffer = beginSingleTimeCommands();
 
@@ -1525,7 +1589,7 @@ private:
 		barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED; // not applicable in our case
 		barrier.image = image;
 		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-		barrier.subresourceRange.baseMipLevel = 0; 
+		barrier.subresourceRange.baseMipLevel = 0;
 		barrier.subresourceRange.levelCount = 1;
 		barrier.subresourceRange.baseArrayLayer = 0;
 		barrier.subresourceRange.layerCount = 1;
@@ -1538,7 +1602,7 @@ private:
 			barrier.srcAccessMask = 0;
 			barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
 
-			sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT; 
+			sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
 			destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 		}
 		// will happen when we copy data from VkImage to GPU memory
@@ -1554,9 +1618,9 @@ private:
 		}
 
 		vkCmdPipelineBarrier(
-			commandBuffer, // 
+			commandBuffer, //
 			sourceStage, // in which pipeline stage the operations occur that should happen before the barrier
-			destinationStage,  // specifies the pipeline stage in which operations will wait on the barrier. 
+			destinationStage,  // specifies the pipeline stage in which operations will wait on the barrier.
 			0,
 			0, nullptr,
 			0, nullptr,
@@ -1614,7 +1678,6 @@ private:
 		}
 	}
 	void createDescriptorPool() {
-
 		std::array<VkDescriptorPoolSize, 2> poolSizes{};
 		poolSizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
 		poolSizes[0].descriptorCount = static_cast<uint32_t>(MAX_FRAMES_IN_FLIGHT);
@@ -1680,7 +1743,7 @@ private:
 			descriptorWrites[1].descriptorCount = 1;
 			descriptorWrites[1].pImageInfo = &imageInfo;
 
-			vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data() , 0, nullptr);
+			vkUpdateDescriptorSets(m_device, static_cast<uint32_t>(descriptorWrites.size()), descriptorWrites.data(), 0, nullptr);
 		}
 	}
 	void createCommandBuffers()
@@ -1774,12 +1837,10 @@ private:
 	}
 	// writes the commands we want to execute into a command buffer
 	void recordCommandBuffer(VkCommandBuffer commandBuffer, uint32_t imageIndex) {
-
+		// two different clear values
 		std::array<VkClearValue, 2> clearValues{};
-		clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} };
-		clearValues[1].depthStencil = { 1.0f, 0 };
-
-
+		clearValues[0].color = { {0.0f, 0.0f, 0.0f, 1.0f} }; // default color
+		clearValues[1].depthStencil = { 1.0f, 0 }; // default depth
 
 		//  begin recording the command buffer by calling vkBeginCommandBuffer
 		VkCommandBufferBeginInfo beginInfo{};
@@ -1803,11 +1864,11 @@ private:
 		renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
 		renderPassInfo.pClearValues = clearValues.data();
 
-	/*	VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
-		renderPassInfo.clearValueCount = 1;
-		renderPassInfo.pClearValues = &clearColor;*/
+		/*	VkClearValue clearColor = { {{0.0f, 0.0f, 0.0f, 1.0f}} };
+			renderPassInfo.clearValueCount = 1;
+			renderPassInfo.pClearValues = &clearColor;*/
 
-		// begin the render pass
+			// begin the render pass
 		vkCmdBeginRenderPass(commandBuffer, &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
 
 		vkCmdBindPipeline(commandBuffer, VK_PIPELINE_BIND_POINT_GRAPHICS, m_graphicsPipeline);
@@ -1820,7 +1881,7 @@ private:
 		// The last two parameters specify the array of vertex buffers to bind and
 		// the byte offsets to start reading vertex data from.
 		vkCmdBindVertexBuffers(commandBuffer, 0, 1, vertexBuffers, offsets);
-		vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT16);
+		vkCmdBindIndexBuffer(commandBuffer, m_indexBuffer, 0, VK_INDEX_TYPE_UINT32);
 
 		// set dynamic viewport and scissor
 		VkViewport viewport{};
@@ -1842,7 +1903,7 @@ private:
 
 		// actual draw call
 		// vkCmdDraw(commandBuffer, static_cast<uint32_t>(vertices.size()), 1, 0, 0);
-		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(indices.size()), 1, 0, 0, 0);
+		vkCmdDrawIndexed(commandBuffer, static_cast<uint32_t>(m_indices.size()), 1, 0, 0, 0);
 
 		// end the render pass
 		vkCmdEndRenderPass(commandBuffer);
@@ -1980,11 +2041,6 @@ private:
 		// delete the render pass object
 		vkDestroyRenderPass(m_device, m_renderPass, nullptr);
 
-		// destroy depth buffer stuff
-		vkDestroyImageView(m_device, m_depthImageView, nullptr);
-		vkDestroyImage(m_device, m_depthImage, nullptr);
-		vkFreeMemory(m_device, m_depthImageMemory, nullptr);
-
 		// delete the vertex buffer and its memory
 		vkDestroyBuffer(m_device, m_indexBuffer, nullptr);
 		vkFreeMemory(m_device, m_indexBufferMemory, nullptr);
@@ -2003,7 +2059,6 @@ private:
 		vkDestroyImageView(m_device, m_textureImageView, nullptr);
 		vkDestroyImage(m_device, m_textureImage, nullptr);
 		vkFreeMemory(m_device, m_textureImageMemory, nullptr);
-
 
 		vkDestroyDescriptorPool(m_device, m_descriptorPool, nullptr);
 		vkDestroyDescriptorSetLayout(m_device, m_descriptorSetLayout, nullptr);
@@ -2058,6 +2113,11 @@ private:
 		for (auto imageView : m_swapChainImageViews) {
 			vkDestroyImageView(m_device, imageView, nullptr);
 		}
+		// destroy depth buffer stuff
+		vkDestroyImageView(m_device, m_depthImageView, nullptr);
+		vkDestroyImage(m_device, m_depthImage, nullptr);
+		vkFreeMemory(m_device, m_depthImageMemory, nullptr);
+
 		// delete the swap chain itself
 		vkDestroySwapchainKHR(m_device, m_swapChain, nullptr);
 	}
